@@ -327,7 +327,7 @@ test "TestContext can observe one canonical durable runtime execution" {
         std.testing.io,
         tmp.dir,
         layer,
-        .{ .causal_store = context.causalStore() },
+        .{ .causal_store = context.causalStore(), .causal_context = context.causalContext() },
     );
     try std.testing.expectEqual(@as(u32, 21), try runtime.run(readProbe().named("probe.test-context")));
     const assertions = zstd.Testing.AssertionRecorder.init(&context);

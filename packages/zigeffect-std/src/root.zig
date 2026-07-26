@@ -45,7 +45,25 @@ pub const Agent = @import("agent/root.zig");
 pub const Application = @import("application/root.zig");
 pub const CausalGraph = @import("causal_graph/root.zig");
 pub const CausalRuntime = @import("runtime/root.zig");
+/// The runtime an application should use. Owns a durable embedded NenDB causal
+/// graph, loads the project manifest for workspace/project/component identity,
+/// and verifies persistence at shutdown.
+///
+/// Takes `(allocator, io, root, layer, options)`. If you are reaching for
+/// `fx.kernel.ManagedRuntime` instead, read `InMemoryRuntime` below first — the
+/// two are different types with the same name and different constructors.
 pub const ManagedRuntime = CausalRuntime.ManagedRuntime;
+/// The lower-level runtime, without durable storage or manifest identity.
+///
+/// Takes `(allocator, layer, options)` and records only into whichever
+/// `CausalStore` it is given, so nothing reaches `.zigeffect/graph`. Use it when
+/// durable evidence would be wrong rather than merely unnecessary — an
+/// allocation-failure sweep, for example, runs the same program thousands of
+/// times and must not write thousands of sessions to the project's graph.
+///
+/// Application and service code should use `ManagedRuntime`; this is the escape
+/// hatch, and it is named so that choosing it is visible at the call site.
+pub const InMemoryRuntime = fx.kernel.ManagedRuntime;
 pub const Statechart = @import("statechart/root.zig");
 pub const Workflow = @import("workflow/root.zig");
 pub const Project = @import("project/root.zig");

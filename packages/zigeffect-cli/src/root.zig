@@ -25,6 +25,7 @@ pub const CliError = error{
     InvalidSeed,
     InvalidFault,
     MissingScenario,
+    MissingFilter,
 };
 
 pub const ScaffoldProfile = enum { @"local-fake", @"integration-real", production };
@@ -70,12 +71,16 @@ pub const UpgradeOptions = struct {
     json: bool = false,
 };
 
-pub const GraphOperation = enum { status, since, event, children, path };
+pub const GraphOperation = enum { status, since, event, children, path, find };
 pub const GraphOptions = struct {
     operation: GraphOperation,
     event_id: u64 = 0,
     to_event_id: u64 = 0,
     limit: usize = 256,
+    /// `find` walks the durable log rather than an index, so the number of
+    /// records it may decode is bounded separately from the match limit.
+    scan_limit: usize = 4096,
+    filter: zstd.CausalGraph.FindFilter = .{},
     root: []const u8 = ".",
     component: ?[]const u8 = null,
     json: bool = false,
@@ -521,7 +526,7 @@ fn runGraphAlloc(
         .max_records = manifest.value.safety.limits.max_runtime_events,
     };
     var snapshot = zstd.CausalGraph.Snapshot.open(allocator, io, graph_root, graph_options) catch |failure| switch (failure) {
-        error.FileNotFound => if (options.operation == .status or (options.operation == .since and options.event_id == 0))
+        error.FileNotFound => if (options.operation == .status or options.operation == .find or (options.operation == .since and options.event_id == 0))
             try zstd.CausalGraph.Snapshot.empty(allocator, graph_options)
         else
             return failure,
@@ -567,6 +572,13 @@ fn runGraphAlloc(
             for (graph_path.event_ids) |id| try text_output.print(allocator, "- {d}\n", .{id});
             break :path try text_output.toOwnedSlice(allocator);
         },
+        .find => try snapshot.findRecordsJsonAlloc(
+            allocator,
+            options.filter,
+            options.event_id,
+            options.limit,
+            options.scan_limit,
+        ),
     };
     return .{ .allocator = allocator, .exit_code = 0, .output = output };
 }
@@ -2573,6 +2585,9 @@ pub fn helpText() []const u8 {
     \\  zigeffect graph since <event-id> [--limit <count>] [--root <path>] [--component <id>] [--json]
     \\  zigeffect graph <event|children> <event-id> [--root <path>] [--component <id>] [--json]
     \\  zigeffect graph path <from-event-id> <to-event-id> [--limit <count>] [--root <path>] [--component <id>] [--json]
+    \\  zigeffect graph find [--label <name>] [--kind <kind>] [--status <status>] [--service <key>]
+    \\                       [--requirement <id>] [--check <id>] [--scenario <id>]
+    \\                       [--after <event-id>] [--limit <count>] [--scan-limit <count>] [--root <path>] [--component <id>]
     \\  zigeffect statechart list [--root <path>] [--component <id>] [--json]
     \\  zigeffect statechart <show|versions|instances|coverage|paths> <machine-id> [--root <path>] [--json]
     \\  zigeffect statechart <trace|explain> <instance-id> [--root <path>] [--json]
@@ -3105,6 +3120,7 @@ fn parseGraphArgs(args: []const []const u8) (CliError || zstd.Project.ProjectErr
     var component_set = false;
     var event_id_set = false;
     var limit_set = false;
+    var scan_limit_set = false;
     var index: usize = 1;
 
     if (operation == .since or operation == .event or operation == .children or operation == .path) {
@@ -3133,12 +3149,59 @@ fn parseGraphArgs(args: []const []const u8) (CliError || zstd.Project.ProjectErr
             options.component = component;
             component_set = true;
         } else if (eql(args[index], "--limit")) {
-            if (operation != .since and operation != .path) return error.UnknownOption;
+            if (operation != .since and operation != .path and operation != .find) return error.UnknownOption;
             if (limit_set) return error.DuplicateOption;
             const value = try optionValue(args, &index);
             options.limit = std.fmt.parseInt(usize, value, 10) catch return error.InvalidLimit;
             if (options.limit == 0 or options.limit > 4096) return error.InvalidLimit;
             limit_set = true;
+        } else if (eql(args[index], "--after")) {
+            if (operation != .find) return error.UnknownOption;
+            if (event_id_set) return error.DuplicateOption;
+            const value = try optionValue(args, &index);
+            options.event_id = std.fmt.parseInt(u64, value, 10) catch return error.InvalidEventId;
+            event_id_set = true;
+        } else if (eql(args[index], "--scan-limit")) {
+            if (operation != .find) return error.UnknownOption;
+            if (scan_limit_set) return error.DuplicateOption;
+            const value = try optionValue(args, &index);
+            options.scan_limit = std.fmt.parseInt(usize, value, 10) catch return error.InvalidLimit;
+            if (options.scan_limit == 0) return error.InvalidLimit;
+            scan_limit_set = true;
+        } else if (eql(args[index], "--label")) {
+            if (operation != .find) return error.UnknownOption;
+            if (options.filter.label != null) return error.DuplicateOption;
+            options.filter.label = try optionValue(args, &index);
+        } else if (eql(args[index], "--kind")) {
+            if (operation != .find) return error.UnknownOption;
+            if (options.filter.kind != null) return error.DuplicateOption;
+            options.filter.kind = try optionValue(args, &index);
+        } else if (eql(args[index], "--status")) {
+            if (operation != .find) return error.UnknownOption;
+            if (options.filter.status != null) return error.DuplicateOption;
+            options.filter.status = try optionValue(args, &index);
+        } else if (eql(args[index], "--service")) {
+            if (operation != .find) return error.UnknownOption;
+            if (options.filter.service_key != null) return error.DuplicateOption;
+            options.filter.service_key = try optionValue(args, &index);
+        } else if (eql(args[index], "--requirement")) {
+            if (operation != .find) return error.UnknownOption;
+            if (options.filter.requirement_id != null) return error.DuplicateOption;
+            const value = try optionValue(args, &index);
+            try zstd.Project.validateIdentifier(value);
+            options.filter.requirement_id = zstd.fx.stableCausalContextId(value);
+        } else if (eql(args[index], "--check")) {
+            if (operation != .find) return error.UnknownOption;
+            if (options.filter.acceptance_check_id != null) return error.DuplicateOption;
+            const value = try optionValue(args, &index);
+            try zstd.Project.validateIdentifier(value);
+            options.filter.acceptance_check_id = zstd.fx.stableCausalContextId(value);
+        } else if (eql(args[index], "--scenario")) {
+            if (operation != .find) return error.UnknownOption;
+            if (options.filter.scenario_id != null) return error.DuplicateOption;
+            const value = try optionValue(args, &index);
+            try zstd.Project.validateIdentifier(value);
+            options.filter.scenario_id = zstd.fx.stableCausalContextId(value);
         } else if (eql(args[index], "--json")) {
             if (options.json) return error.DuplicateOption;
             options.json = true;
@@ -3146,6 +3209,9 @@ fn parseGraphArgs(args: []const []const u8) (CliError || zstd.Project.ProjectErr
         } else return error.UnknownOption;
     }
     if ((operation == .since or operation == .event or operation == .children or operation == .path) and !event_id_set) return error.InvalidEventId;
+    // An unfiltered `find` would decode every record only to return them all,
+    // which `since` already does far more cheaply.
+    if (operation == .find and options.filter.isEmpty()) return error.MissingFilter;
     try validateTarget(options.root);
     return options;
 }
@@ -3683,6 +3749,17 @@ test "CLI parses bounded project add and generate operations" {
     try std.testing.expectEqual(@as(usize, 64), graph_since.graph.limit);
     try std.testing.expectEqual(@as(u64, 0), (try parseArgs(&.{ "graph", "since", "0" })).graph.event_id);
     try std.testing.expectError(error.InvalidLimit, parseArgs(&.{ "graph", "since", "42", "--limit", "0" }));
+    const graph_find = try parseArgs(&.{ "graph", "find", "--label", "TodoService.create", "--status", "failure", "--requirement", "req-todo-domain", "--after", "12", "--limit", "8", "--scan-limit", "1024" });
+    try std.testing.expectEqual(GraphOperation.find, graph_find.graph.operation);
+    try std.testing.expectEqualStrings("TodoService.create", graph_find.graph.filter.label.?);
+    try std.testing.expectEqualStrings("failure", graph_find.graph.filter.status.?);
+    try std.testing.expectEqual(zstd.fx.stableCausalContextId("req-todo-domain"), graph_find.graph.filter.requirement_id.?);
+    try std.testing.expectEqual(@as(u64, 12), graph_find.graph.event_id);
+    try std.testing.expectEqual(@as(usize, 1024), graph_find.graph.scan_limit);
+    // An unconstrained find is a usage error, not a full-table scan.
+    try std.testing.expectError(error.MissingFilter, parseArgs(&.{ "graph", "find", "--json" }));
+    // Selection flags belong to find alone.
+    try std.testing.expectError(error.UnknownOption, parseArgs(&.{ "graph", "since", "1", "--label", "x" }));
     try std.testing.expectError(error.InvalidEventId, parseArgs(&.{ "graph", "event", "0" }));
     try std.testing.expectError(error.InvalidEventId, parseArgs(&.{ "graph", "event" }));
     try std.testing.expectError(error.InvalidEventId, parseArgs(&.{ "graph", "children", "not-a-number" }));

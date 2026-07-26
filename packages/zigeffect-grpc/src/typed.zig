@@ -835,10 +835,34 @@ fn causalCorrelation(metadata: []const Grpc.Metadata) CausalCorrelation {
     const trace_parent = fx.parseTraceParent(traceparent) catch null;
     var context = if (trace_parent) |trace| trace.context() else fx.CausalContextV2{};
     if (!lineage_baggage_invalid) context.lineage = lineage;
+
+    // A call that arrives without a traceparent is the *root* of a trace, not an
+    // untraced call. Without originating one here every causal fact this server
+    // records would carry a null trace identity and could never be joined to an
+    // exported span. The root identity is derived from the request id rather
+    // than a clock or RNG so replaying a recorded scenario reproduces it.
+    const root_trace: ?fx.TraceParent = if (trace_parent == null and request_id.len != 0) root: {
+        const high = std.hash.Wyhash.hash(0x7a49_0000, request_id);
+        const low = std.hash.Wyhash.hash(0x7a49_0001, request_id);
+        const span = std.hash.Wyhash.hash(0x7a49_0002, request_id);
+        break :root .{
+            .trace_id_high = if (high == 0) 1 else high,
+            .trace_id_low = if (low == 0) 1 else low,
+            .parent_id = if (span == 0) 1 else span,
+            .flags = 0,
+        };
+    } else null;
+    if (root_trace) |root| {
+        context.trace_id_high = root.trace_id_high;
+        context.trace_id_low = root.trace_id_low;
+        context.span_id = root.parent_id;
+    }
+
+    const effective = trace_parent orelse root_trace;
     return .{
         .boundary_id = if (request_id.len == 0) null else std.hash.Wyhash.hash(0, request_id),
-        .trace_id = if (trace_parent) |trace| trace.trace_id_low else null,
-        .span_id = if (trace_parent) |trace| trace.parent_id else null,
+        .trace_id = if (effective) |trace| trace.trace_id_low else null,
+        .span_id = if (effective) |trace| trace.parent_id else null,
         .context = context,
         .lineage_baggage_invalid = lineage_baggage_invalid,
     };
@@ -1337,6 +1361,51 @@ test "typed unary binding permits a response to borrow decoded protobuf storage"
     });
     defer response.deinit();
     try std.testing.expectEqualSlices(u8, &.{ 3, 'z', 'i', 'g' }, response.payload);
+}
+
+test "boundary correlation originates a root trace when the caller supplies none" {
+    // Inbound traceparent wins: the server joins the caller's trace.
+    const joined = causalCorrelation(&.{
+        .{ .name = "traceparent", .value = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01" },
+        .{ .name = "x-request-id", .value = "request-42" },
+    });
+    try std.testing.expectEqual(@as(u64, 0xa3ce929d0e0e4736), joined.trace_id.?);
+    try std.testing.expectEqual(@as(u64, 0x00f067aa0ba902b7), joined.span_id.?);
+
+    // No traceparent: the call is the root of a trace rather than untraced.
+    const root = causalCorrelation(&.{.{ .name = "x-request-id", .value = "request-42" }});
+    try std.testing.expect(root.trace_id != null);
+    try std.testing.expect(root.span_id != null);
+    try std.testing.expect(root.context.trace_id_high != null);
+    try std.testing.expectEqual(root.trace_id.?, root.context.trace_id_low.?);
+    try std.testing.expectEqual(root.span_id.?, root.context.span_id.?);
+    // A root trace must not be mistaken for the caller's trace.
+    try std.testing.expect(root.trace_id.? != joined.trace_id.?);
+
+    // Deterministic: replaying the same request reproduces the same identity.
+    const replay = causalCorrelation(&.{.{ .name = "x-request-id", .value = "request-42" }});
+    try std.testing.expectEqual(root.trace_id.?, replay.trace_id.?);
+    try std.testing.expectEqual(root.span_id.?, replay.span_id.?);
+    // Distinct requests are distinct traces.
+    const other = causalCorrelation(&.{.{ .name = "x-request-id", .value = "request-43" }});
+    try std.testing.expect(other.trace_id.? != root.trace_id.?);
+
+    // Lineage baggage survives root origination.
+    const ProductId = fx.Lineage.Key([]const u8, .{
+        .name = "commerce.product.id",
+        .privacy = .internal,
+        .propagation = .distributed,
+        .export_policy = .otel,
+    });
+    const product = try ProductId.reference(77, "product-42");
+    var baggage_buffer: [fx.Lineage.max_baggage_bytes]u8 = undefined;
+    const baggage = try fx.Lineage.Set.empty.with(product).formatBaggage(&baggage_buffer);
+    const with_baggage = causalCorrelation(&.{
+        .{ .name = "x-request-id", .value = "request-42" },
+        .{ .name = "baggage", .value = baggage },
+    });
+    try std.testing.expect(with_baggage.trace_id != null);
+    try std.testing.expect(!with_baggage.context.lineage.isEmpty());
 }
 
 test "typed streaming client preserves decoded messages metadata and final status" {

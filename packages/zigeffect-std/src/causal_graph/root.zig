@@ -16,6 +16,8 @@ pub const path_schema = "zigeffect.causal.local-graph-path.v1";
 pub const path_schema_version: u32 = 1;
 pub const lineage_schema = "zigeffect.causal.local-graph-lineage.v1";
 pub const lineage_schema_version: u32 = 1;
+pub const find_schema = "zigeffect.causal.local-graph-find.v1";
+pub const find_schema_version: u32 = 1;
 pub const default_path = ".zigeffect/graph";
 pub const default_wal_name = "causal-graph.jsonl";
 pub const default_max_records: usize = 65_536;
@@ -62,9 +64,24 @@ pub const Path = struct {
     }
 };
 
+/// What the graph does when a write would exceed `max_records` or `max_wal_bytes`.
+pub const Retention = enum {
+    /// Refuse the write. Every fact ever recorded stays addressable, so a
+    /// receipt referencing an event id can always be resolved. This is the
+    /// default because the graph is evidence: dropping it silently would let a
+    /// proof-carrying claim outlive the record that justified it.
+    fail_closed,
+    /// Drop the oldest complete sessions to make room. A long-running service
+    /// keeps recording instead of failing, at the cost of losing the oldest
+    /// history. Sessions are pruned whole because parent edges never cross a
+    /// session boundary, so no retained record is left pointing at a gap.
+    prune_oldest_sessions,
+};
+
 pub const Options = struct {
     path: []const u8 = default_path,
     wal_name: []const u8 = default_wal_name,
+    retention: Retention = .fail_closed,
     max_records: usize = default_max_records,
     max_wal_bytes: usize = 64 * 1024 * 1024,
     max_record_bytes: usize = 512 * 1024,
@@ -452,6 +469,65 @@ pub const LocalDatabase = struct {
         return output.toOwnedSlice(allocator);
     }
 
+    /// Scan one bounded durable page and return a flattened summary of the
+    /// records matching `filter`.
+    ///
+    /// The durable record nests semantic identity inside an encoded property
+    /// blob, which makes triage a two-stage decode over every row. This lifts
+    /// `label`, `kind`, `status`, `service_key` and the correlation identifiers
+    /// to the top level so an agent can select and read in one pass, then fetch
+    /// the untouched full record with `recordJsonAlloc` when it needs detail.
+    ///
+    /// Matching is a bounded scan, not an index: `after_durable_event_id`
+    /// advances over scanned records rather than matches, so a sparse query
+    /// still makes progress and reports incomplete pagination explicitly.
+    pub fn findRecordsJsonAlloc(
+        self: *LocalDatabase,
+        allocator: std.mem.Allocator,
+        filter: FindFilter,
+        after_durable_event_id: u64,
+        limit: usize,
+        scan_limit: usize,
+    ) ![]u8 {
+        try validateFindQuery(filter, limit, scan_limit);
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        const range = try recordsAfterRange(self.entries.items, after_durable_event_id, scan_limit);
+        var rows: std.ArrayList(u8) = .empty;
+        defer rows.deinit(allocator);
+
+        var scanned: usize = 0;
+        var matched: usize = 0;
+        var last_scanned: ?u64 = null;
+        var stopped_early = false;
+        for (self.entries.items[range.start..range.end], 0..) |entry, relative_index| {
+            const row = try allocator.alloc(u8, entry.length);
+            defer allocator.free(row);
+            const read = try self.wal_file.readPositionalAll(self.io, row, entry.offset);
+            if (read != entry.length) return error.CorruptGraph;
+            scanned += 1;
+            last_scanned = entry.durable_event_id;
+            if (try appendFindRowIfMatch(&rows, allocator, entry, row, filter, matched != 0)) {
+                matched += 1;
+                if (matched == limit) {
+                    stopped_early = relative_index + 1 < range.end - range.start;
+                    break;
+                }
+            }
+        }
+
+        return findResultJsonAlloc(
+            allocator,
+            rows.items,
+            after_durable_event_id,
+            last_scanned,
+            scanned,
+            matched,
+            stopped_early or range.truncated,
+        );
+    }
+
     /// Scan one bounded durable page and return only records carrying the
     /// requested opaque typed value. `after_durable_event_id` advances over
     /// scanned records, not only matches, so sparse queries always make
@@ -599,6 +675,117 @@ pub const LocalDatabase = struct {
         if (self.session_id == 0) return error.SessionIdOverflow;
     }
 
+    /// Index of the first entry to retain when dropping oldest sessions.
+    ///
+    /// Prunes on whole-session boundaries and never touches the session being
+    /// written, so the returned cut always leaves a referentially complete
+    /// graph. Returns 0 when nothing can be dropped — a single session larger
+    /// than the retention target cannot be compacted, and the caller must still
+    /// fail rather than pretend there was room.
+    fn retentionCutIndexUnlocked(self: *const LocalDatabase) usize {
+        const target = @max(self.options.max_records / 2, 1);
+        var cut: usize = 0;
+        while (cut < self.entries.items.len and self.entries.items.len - cut > target) {
+            const session = self.entries.items[cut].session_id;
+            if (session == self.session_id) break;
+            while (cut < self.entries.items.len and self.entries.items[cut].session_id == session) cut += 1;
+        }
+        return cut;
+    }
+
+    /// Rewrite the log without its oldest sessions and rebuild every derived
+    /// index. The replacement is staged in a sibling file and renamed into
+    /// place, so an interrupted compaction leaves the original log intact.
+    fn pruneOldestSessionsUnlocked(self: *LocalDatabase) !void {
+        const cut = self.retentionCutIndexUnlocked();
+        if (cut == 0) return;
+
+        const content = try self.graph_dir.readFileAlloc(
+            self.io,
+            self.options.wal_name,
+            self.allocator,
+            .limited(self.options.max_wal_bytes),
+        );
+        defer self.allocator.free(content);
+
+        // `sequence` is the record's 1-based position in the log, so dropping a
+        // prefix means every retained record has to be renumbered; a verbatim
+        // copy would fail the contiguity check on the next open.
+        var retained: std.ArrayList(u8) = .empty;
+        defer retained.deinit(self.allocator);
+        var lengths: std.ArrayList(usize) = .empty;
+        defer lengths.deinit(self.allocator);
+        try lengths.ensureTotalCapacity(self.allocator, self.entries.items.len - cut);
+        for (self.entries.items[cut..], 0..) |entry, index| {
+            if (entry.offset + entry.length > content.len) return error.CorruptGraph;
+            const line = content[entry.offset .. entry.offset + entry.length];
+            var parsed = std.json.parseFromSlice(PersistedRecord, self.allocator, line, .{ .allocate = .alloc_always }) catch
+                return error.CorruptGraph;
+            defer parsed.deinit();
+            var record = parsed.value;
+            record.sequence = @as(u64, @intCast(index)) + 1;
+            const row = try formatRecordAlloc(self.allocator, record);
+            defer self.allocator.free(row);
+            lengths.appendAssumeCapacity(row.len);
+            try retained.appendSlice(self.allocator, row);
+            try retained.append(self.allocator, '\n');
+        }
+
+        const staging_name = try std.fmt.allocPrint(self.allocator, "{s}.compact", .{self.options.wal_name});
+        defer self.allocator.free(staging_name);
+        {
+            var staging = try self.graph_dir.createFile(self.io, staging_name, .{
+                .read = true,
+                .truncate = true,
+                .resolve_beneath = true,
+            });
+            defer staging.close(self.io);
+            try staging.writePositionalAll(self.io, retained.items, 0);
+            try staging.sync(self.io);
+        }
+        try self.graph_dir.rename(staging_name, self.graph_dir, self.options.wal_name, self.io);
+
+        self.wal_file.close(self.io);
+        self.wal_file = try self.graph_dir.createFile(self.io, self.options.wal_name, .{
+            .read = true,
+            .truncate = false,
+            .lock = .exclusive,
+            .resolve_beneath = true,
+        });
+
+        // Offsets, the durable lookup table and the in-memory graph all describe
+        // positions in the file that was just replaced, so every one is rebuilt.
+        self.nendb.deinit();
+        self.nendb.* = try Nendb.GraphData.initCapacity(
+            self.allocator,
+            self.options.max_records,
+            self.options.max_records,
+        );
+        self.durable_entry_index.clearRetainingCapacity();
+        var rebuilt: std.ArrayList(IndexEntry) = .empty;
+        errdefer rebuilt.deinit(self.allocator);
+        try rebuilt.ensureTotalCapacity(self.allocator, self.entries.items.len - cut);
+        var offset: usize = 0;
+        var edges: usize = 0;
+        for (self.entries.items[cut..], 0..) |entry, index| {
+            var moved = entry;
+            moved.sequence = @as(u64, @intCast(index)) + 1;
+            moved.offset = offset;
+            moved.length = lengths.items[index];
+            offset += moved.length + 1;
+            if (entry.durable_parent_id != null) edges += 1;
+            rebuilt.appendAssumeCapacity(moved);
+        }
+        self.edge_count = edges;
+        self.entries.deinit(self.allocator);
+        self.entries = rebuilt;
+        try self.durable_entry_index.ensureUnusedCapacity(self.allocator, @intCast(self.entries.items.len));
+        for (self.entries.items, 0..) |entry, index| {
+            self.durable_entry_index.putAssumeCapacityNoClobber(entry.durable_event_id, index);
+        }
+        try self.rebuildNendb(retained.items);
+    }
+
     fn rebuildNendb(self: *LocalDatabase, content: []const u8) !void {
         var line_start: usize = 0;
         while (std.mem.indexOfScalarPos(u8, content, line_start, '\n')) |newline| {
@@ -616,7 +803,13 @@ pub const LocalDatabase = struct {
     fn appendWrite(self: *LocalDatabase, write: fx.CausalNendbWrite) !void {
         self.mutex.lock();
         defer self.mutex.unlock();
-        if (self.entries.items.len >= self.options.max_records) return error.GraphDatabaseFull;
+        if (self.entries.items.len >= self.options.max_records) {
+            if (self.options.retention == .fail_closed) return error.GraphDatabaseFull;
+            try self.pruneOldestSessionsUnlocked();
+            // Compaction can only drop sessions older than the current one, so a
+            // single oversized session still fills the graph.
+            if (self.entries.items.len >= self.options.max_records) return error.GraphDatabaseFull;
+        }
         try ensureSafe(write.node.label);
         try ensureSafe(write.node.properties);
         if (write.node.id == 0 or self.durableIdUnlocked(write.node.id) != null) return error.DuplicateSourceEvent;
@@ -661,12 +854,24 @@ pub const LocalDatabase = struct {
         const row = try formatRecordAlloc(self.allocator, record);
         defer self.allocator.free(row);
         if (row.len > self.options.max_record_bytes) return error.GraphRecordTooLarge;
+
+        // Byte pressure is relieved before any capacity is reserved, because
+        // compaction replaces the entry list wholesale.
+        const row_bytes = @as(u64, @intCast(row.len + 1));
+        var length_u64 = try self.wal_file.length(self.io);
+        if ((std.math.add(u64, length_u64, row_bytes) catch return error.GraphDatabaseFull) > self.options.max_wal_bytes) {
+            if (self.options.retention == .fail_closed) return error.GraphDatabaseFull;
+            try self.pruneOldestSessionsUnlocked();
+            length_u64 = try self.wal_file.length(self.io);
+            if ((std.math.add(u64, length_u64, row_bytes) catch return error.GraphDatabaseFull) > self.options.max_wal_bytes) {
+                return error.GraphDatabaseFull;
+            }
+        }
+
         try self.entries.ensureUnusedCapacity(self.allocator, 1);
         try self.durable_entry_index.ensureUnusedCapacity(self.allocator, 1);
         try self.current_source_index.ensureUnusedCapacity(self.allocator, 1);
-        const offset_u64 = try self.wal_file.length(self.io);
-        const required = std.math.add(u64, offset_u64, @as(u64, @intCast(row.len + 1))) catch return error.GraphDatabaseFull;
-        if (required > self.options.max_wal_bytes) return error.GraphDatabaseFull;
+        const offset_u64 = length_u64;
         const offset: usize = @intCast(offset_u64);
 
         const node_index = try self.nendb.addNode(durable_id, write.node.kind);
@@ -716,6 +921,181 @@ const LineagePropertiesProjection = struct {
         } = .{},
     } = .{},
 };
+
+/// The semantic fields a triaging agent selects on. Every field is an exact
+/// match; an unset field does not constrain the scan.
+pub const FindFilter = struct {
+    label: ?[]const u8 = null,
+    kind: ?[]const u8 = null,
+    status: ?[]const u8 = null,
+    service_key: ?[]const u8 = null,
+    requirement_id: ?u64 = null,
+    acceptance_check_id: ?u64 = null,
+    scenario_id: ?u64 = null,
+
+    pub fn isEmpty(self: FindFilter) bool {
+        return self.label == null and self.kind == null and self.status == null and
+            self.service_key == null and self.requirement_id == null and
+            self.acceptance_check_id == null and self.scenario_id == null;
+    }
+};
+
+/// The stored node property blob is a JSON *string* inside the record, so the
+/// semantic identity an agent filters on is one decode below the surface. This
+/// projection reads only the fields `find` selects and emits.
+const FindPropertiesProjection = struct {
+    event_id: u64 = 0,
+    kind: []const u8 = "",
+    label: []const u8 = "",
+    status: []const u8 = "",
+    service_key: []const u8 = "",
+    type_name: []const u8 = "",
+    run_id: ?u64 = null,
+    parent_id: ?u64 = null,
+    context: struct {
+        requirement_id: ?u64 = null,
+        acceptance_check_id: ?u64 = null,
+        scenario_id: ?u64 = null,
+    } = .{},
+};
+
+fn matchesText(selector: ?[]const u8, value: []const u8) bool {
+    const wanted = selector orelse return true;
+    return std.mem.eql(u8, wanted, value);
+}
+
+fn matchesId(selector: ?u64, value: ?u64) bool {
+    const wanted = selector orelse return true;
+    return value != null and value.? == wanted;
+}
+
+fn appendOptionalId(output: *std.ArrayList(u8), allocator: std.mem.Allocator, name: []const u8, value: ?u64) !void {
+    if (value) |present| {
+        const rendered = try std.fmt.allocPrint(allocator, ",\"{s}\":{d}", .{ name, present });
+        defer allocator.free(rendered);
+        try output.appendSlice(allocator, rendered);
+    } else {
+        const rendered = try std.fmt.allocPrint(allocator, ",\"{s}\":null", .{name});
+        defer allocator.free(rendered);
+        try output.appendSlice(allocator, rendered);
+    }
+}
+
+/// Emit one flattened match. Text fields come from the validated property blob
+/// and are already constrained by `ensureSafe`, so they need no re-escaping.
+fn appendFindRow(
+    output: *std.ArrayList(u8),
+    allocator: std.mem.Allocator,
+    entry: IndexEntry,
+    record: PersistedRecord,
+    projection: FindPropertiesProjection,
+) !void {
+    const head = try std.fmt.allocPrint(
+        allocator,
+        "{{\"durable_event_id\":{d},\"source_event_id\":{d},\"sequence\":{d},\"session_id\":{d}," ++
+            "\"kind\":\"{s}\",\"label\":\"{s}\",\"status\":\"{s}\",\"service_key\":\"{s}\",\"type_name\":\"{s}\"",
+        .{
+            entry.durable_event_id,
+            entry.source_event_id,
+            record.sequence,
+            record.session_id,
+            projection.kind,
+            projection.label,
+            projection.status,
+            projection.service_key,
+            projection.type_name,
+        },
+    );
+    defer allocator.free(head);
+    try output.appendSlice(allocator, head);
+    try appendOptionalId(output, allocator, "run_id", projection.run_id);
+    try appendOptionalId(output, allocator, "durable_parent_id", entry.durable_parent_id);
+    try appendOptionalId(output, allocator, "requirement_id", projection.context.requirement_id);
+    try appendOptionalId(output, allocator, "acceptance_check_id", projection.context.acceptance_check_id);
+    try appendOptionalId(output, allocator, "scenario_id", projection.context.scenario_id);
+    try output.append(allocator, '}');
+}
+
+fn projectionMatches(projection: FindPropertiesProjection, filter: FindFilter) bool {
+    return matchesText(filter.label, projection.label) and
+        matchesText(filter.kind, projection.kind) and
+        matchesText(filter.status, projection.status) and
+        matchesText(filter.service_key, projection.service_key) and
+        matchesId(filter.requirement_id, projection.context.requirement_id) and
+        matchesId(filter.acceptance_check_id, projection.context.acceptance_check_id) and
+        matchesId(filter.scenario_id, projection.context.scenario_id);
+}
+
+/// Decode one durable row, and append its flattened projection when it matches.
+/// Shared by the live database and the read-only snapshot so both expose exactly
+/// the same selection semantics and output shape.
+fn appendFindRowIfMatch(
+    rows: *std.ArrayList(u8),
+    allocator: std.mem.Allocator,
+    entry: IndexEntry,
+    row: []const u8,
+    filter: FindFilter,
+    separate: bool,
+) !bool {
+    var persisted = std.json.parseFromSlice(PersistedRecord, allocator, row, .{ .allocate = .alloc_always }) catch
+        return error.CorruptGraph;
+    defer persisted.deinit();
+    var properties = std.json.parseFromSlice(
+        FindPropertiesProjection,
+        allocator,
+        persisted.value.node.properties,
+        .{ .allocate = .alloc_always, .ignore_unknown_fields = true },
+    ) catch return error.CorruptGraph;
+    defer properties.deinit();
+    if (!projectionMatches(properties.value, filter)) return false;
+
+    if (separate) try rows.append(allocator, ',');
+    try appendFindRow(rows, allocator, entry, persisted.value, properties.value);
+    return true;
+}
+
+fn findResultJsonAlloc(
+    allocator: std.mem.Allocator,
+    rows: []const u8,
+    after_durable_event_id: u64,
+    last_scanned: ?u64,
+    scanned: usize,
+    matched: usize,
+    truncated: bool,
+) ![]u8 {
+    const next_json = if (truncated and last_scanned != null)
+        try std.fmt.allocPrint(allocator, "{d}", .{last_scanned.?})
+    else
+        try allocator.dupe(u8, "null");
+    defer allocator.free(next_json);
+
+    var output: std.ArrayList(u8) = .empty;
+    errdefer output.deinit(allocator);
+    const header = try std.fmt.allocPrint(
+        allocator,
+        "{{\"schema\":\"{s}\",\"schema_version\":{d},\"after_event_id\":{d},\"next_after_event_id\":{s},\"scanned\":{d},\"matched\":{d},\"truncated\":{s},\"records\":[",
+        .{
+            find_schema,
+            find_schema_version,
+            after_durable_event_id,
+            next_json,
+            scanned,
+            matched,
+            if (truncated) "true" else "false",
+        },
+    );
+    defer allocator.free(header);
+    try output.appendSlice(allocator, header);
+    try output.appendSlice(allocator, rows);
+    try output.appendSlice(allocator, "]}");
+    return output.toOwnedSlice(allocator);
+}
+
+fn validateFindQuery(filter: FindFilter, limit: usize, scan_limit: usize) !void {
+    if (filter.isEmpty() or limit == 0 or limit > 4096 or scan_limit == 0 or scan_limit > max_records) {
+        return error.InvalidGraphOptions;
+    }
+}
 
 fn persistedRowContainsLineage(
     allocator: std.mem.Allocator,
@@ -839,6 +1219,49 @@ pub const Snapshot = struct {
             self.entries,
             range,
             after_durable_event_id,
+        );
+    }
+
+    /// Read-only counterpart of `LocalDatabase.findRecordsJsonAlloc`, used by the
+    /// CLI so an agent can select causal evidence without opening the live graph.
+    pub fn findRecordsJsonAlloc(
+        self: *const Snapshot,
+        allocator: std.mem.Allocator,
+        filter: FindFilter,
+        after_durable_event_id: u64,
+        limit: usize,
+        scan_limit: usize,
+    ) ![]u8 {
+        try validateFindQuery(filter, limit, scan_limit);
+        const range = try recordsAfterRange(self.entries, after_durable_event_id, scan_limit);
+        var rows: std.ArrayList(u8) = .empty;
+        defer rows.deinit(allocator);
+
+        var scanned: usize = 0;
+        var matched: usize = 0;
+        var last_scanned: ?u64 = null;
+        var stopped_early = false;
+        for (self.entries[range.start..range.end], 0..) |entry, relative_index| {
+            const row = self.content[entry.offset .. entry.offset + entry.length];
+            scanned += 1;
+            last_scanned = entry.durable_event_id;
+            if (try appendFindRowIfMatch(&rows, allocator, entry, row, filter, matched != 0)) {
+                matched += 1;
+                if (matched == limit) {
+                    stopped_early = relative_index + 1 < range.end - range.start;
+                    break;
+                }
+            }
+        }
+
+        return findResultJsonAlloc(
+            allocator,
+            rows.items,
+            after_durable_event_id,
+            last_scanned,
+            scanned,
+            matched,
+            stopped_early or range.truncated,
         );
     }
 
@@ -1454,4 +1877,169 @@ test "durable causal graph returns bounded paginated typed lineage records" {
     defer std.testing.allocator.free(second_page);
     try std.testing.expect(std.mem.indexOf(u8, second_page, "matching-end") != null);
     try std.testing.expect(std.mem.indexOf(u8, second_page, "matching-start") == null);
+}
+
+test "causal graph retention drops oldest sessions instead of failing closed" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const options = Options{ .max_records = 4, .retention = .prune_oldest_sessions };
+
+    // Three separate sessions, two records each, written across reopens so the
+    // graph accumulates history the way a long-running service does.
+    var session: usize = 0;
+    while (session < 3) : (session += 1) {
+        var database = try LocalDatabase.init(std.testing.allocator, std.testing.io, tmp.dir, options);
+        defer database.deinit();
+        const events = [_]fx.CausalEvent{
+            .{ .id = 1, .kind = .run_started, .label = "session-start" },
+            .{ .id = 2, .kind = .run_completed, .parent_id = 1, .label = "session-end" },
+        };
+        for (events) |event| {
+            var write = try fx.mapCausalEventToNendbWrite(std.testing.allocator, event);
+            defer fx.deinitCausalNendbWrite(std.testing.allocator, &write);
+            try database.appendWrite(write);
+        }
+        try database.flush();
+    }
+
+    var database = try LocalDatabase.init(std.testing.allocator, std.testing.io, tmp.dir, options);
+    defer database.deinit();
+    // Six writes against a four-record graph: the oldest session was dropped
+    // rather than the sixth write being refused.
+    try std.testing.expect(database.recordCount() <= options.max_records);
+    try std.testing.expect(database.recordCount() > 0);
+
+    // Every retained record still resolves, and each retained child still finds
+    // its parent, so compaction left no dangling reference behind.
+    const summary_json = try database.summaryJsonAlloc(std.testing.allocator);
+    defer std.testing.allocator.free(summary_json);
+    try std.testing.expect(std.mem.indexOf(u8, summary_json, "\"trailing_partial_bytes\":0") != null);
+
+    const records = try database.recordsAfterJsonAlloc(std.testing.allocator, 0, 64);
+    defer std.testing.allocator.free(records);
+    var parsed = try std.json.parseFromSlice(
+        struct { records: []struct { node: struct { id: u64 }, parent_edge: ?struct { from: u64 } = null } },
+        std.testing.allocator,
+        records,
+        .{ .allocate = .alloc_always, .ignore_unknown_fields = true },
+    );
+    defer parsed.deinit();
+    try std.testing.expect(parsed.value.records.len > 0);
+    for (parsed.value.records) |record| {
+        const resolved = try database.recordJsonAlloc(std.testing.allocator, record.node.id);
+        std.testing.allocator.free(resolved);
+        if (record.parent_edge) |edge| try std.testing.expect(database.contains(edge.from));
+    }
+}
+
+test "causal graph fails closed by default rather than discarding evidence" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var database = try LocalDatabase.init(std.testing.allocator, std.testing.io, tmp.dir, .{ .max_records = 2 });
+    defer database.deinit();
+
+    const events = [_]fx.CausalEvent{
+        .{ .id = 1, .kind = .run_started, .label = "first" },
+        .{ .id = 2, .kind = .activity_completed, .parent_id = 1, .label = "second" },
+        .{ .id = 3, .kind = .run_completed, .parent_id = 2, .label = "third" },
+    };
+    var write_one = try fx.mapCausalEventToNendbWrite(std.testing.allocator, events[0]);
+    defer fx.deinitCausalNendbWrite(std.testing.allocator, &write_one);
+    try database.appendWrite(write_one);
+    var write_two = try fx.mapCausalEventToNendbWrite(std.testing.allocator, events[1]);
+    defer fx.deinitCausalNendbWrite(std.testing.allocator, &write_two);
+    try database.appendWrite(write_two);
+    var write_three = try fx.mapCausalEventToNendbWrite(std.testing.allocator, events[2]);
+    defer fx.deinitCausalNendbWrite(std.testing.allocator, &write_three);
+    try std.testing.expectError(error.GraphDatabaseFull, database.appendWrite(write_three));
+    try std.testing.expectEqual(@as(usize, 2), database.recordCount());
+}
+
+test "durable causal graph selects flattened records by semantic identity" {
+    const requirement = fx.stableCausalContextId("req-todo-domain");
+    const other_requirement = fx.stableCausalContextId("req-grpc-boundary");
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var database = try LocalDatabase.init(std.testing.allocator, std.testing.io, tmp.dir, .{});
+    defer database.deinit();
+
+    const events = [_]fx.CausalEvent{
+        .{
+            .id = 1,
+            .kind = .run_started,
+            .label = "TodoService.create",
+            .status = "success",
+            .service_key = "application/TodoService",
+            .context = .{ .requirement_id = requirement },
+        },
+        .{
+            .id = 2,
+            .kind = .activity_completed,
+            .parent_id = 1,
+            .label = "TodoService.create",
+            .status = "failure",
+            .service_key = "application/TodoService",
+            .context = .{ .requirement_id = requirement },
+        },
+        .{
+            .id = 3,
+            .kind = .activity_completed,
+            .parent_id = 2,
+            .label = "TodoService.create",
+            .status = "failure",
+            .service_key = "application/TodoService",
+            .context = .{ .requirement_id = other_requirement },
+        },
+    };
+    for (events) |event| {
+        var write = try fx.mapCausalEventToNendbWrite(std.testing.allocator, event);
+        defer fx.deinitCausalNendbWrite(std.testing.allocator, &write);
+        try database.appendWrite(write);
+    }
+
+    // A failure filter scoped to one requirement must exclude the identically
+    // labelled failure belonging to another requirement.
+    const scoped = try database.findRecordsJsonAlloc(
+        std.testing.allocator,
+        .{ .status = "failure", .requirement_id = requirement },
+        0,
+        8,
+        8,
+    );
+    defer std.testing.allocator.free(scoped);
+    try std.testing.expect(std.mem.indexOf(u8, scoped, find_schema) != null);
+    try std.testing.expect(std.mem.indexOf(u8, scoped, "\"scanned\":3") != null);
+    try std.testing.expect(std.mem.indexOf(u8, scoped, "\"matched\":1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, scoped, "\"durable_event_id\":2") != null);
+    try std.testing.expect(std.mem.indexOf(u8, scoped, "\"durable_event_id\":3") == null);
+
+    // The projection is flat: identity an agent selects on is readable without
+    // decoding the nested property blob a second time.
+    try std.testing.expect(std.mem.indexOf(u8, scoped, "\"label\":\"TodoService.create\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, scoped, "\"status\":\"failure\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, scoped, "\"service_key\":\"application/TodoService\"") != null);
+
+    const by_label = try database.findRecordsJsonAlloc(std.testing.allocator, .{ .label = "TodoService.create" }, 0, 8, 8);
+    defer std.testing.allocator.free(by_label);
+    try std.testing.expect(std.mem.indexOf(u8, by_label, "\"matched\":3") != null);
+
+    // Pagination advances over scanned records, not matches, so a sparse
+    // selection still makes forward progress.
+    const first_page = try database.findRecordsJsonAlloc(std.testing.allocator, .{ .status = "failure" }, 0, 1, 8);
+    defer std.testing.allocator.free(first_page);
+    try std.testing.expect(std.mem.indexOf(u8, first_page, "\"matched\":1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, first_page, "\"truncated\":true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, first_page, "\"next_after_event_id\":2") != null);
+
+    const second = try database.findRecordsJsonAlloc(std.testing.allocator, .{ .status = "failure" }, 2, 8, 8);
+    defer std.testing.allocator.free(second);
+    try std.testing.expect(std.mem.indexOf(u8, second, "\"durable_event_id\":3") != null);
+    try std.testing.expect(std.mem.indexOf(u8, second, "\"durable_event_id\":2") == null);
+
+    // An unconstrained selection is rejected rather than silently returning all.
+    try std.testing.expectError(
+        error.InvalidGraphOptions,
+        database.findRecordsJsonAlloc(std.testing.allocator, .{}, 0, 8, 8),
+    );
 }

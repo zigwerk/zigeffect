@@ -195,6 +195,24 @@ pub const TestContext = struct {
         return &self.causal_store;
     }
 
+    /// Derive the durable correlation context for the scenario under test.
+    ///
+    /// Every node the managed runtime persists inherits these identifiers, so an
+    /// agent can select causal evidence by requirement, acceptance check, or
+    /// scenario instead of paging the whole graph and filtering client-side.
+    /// The runtime fills workspace/project/session identity itself, so only the
+    /// fields the scenario actually knows are set here.
+    pub fn causalContext(self: *TestContext) fx.CausalContextV2 {
+        const selected = self.options.scenario;
+        return .{
+            .requirement_id = fx.stableCausalContextId(selected.requirement),
+            .acceptance_check_id = fx.stableCausalContextId(selected.acceptance_check),
+            .scenario_id = fx.stableCausalContextId(selected.id),
+            .component_id = fx.stableCausalContextId(selected.component),
+            .source_revision_id = fx.stableCausalContextId(self.options.source_revision),
+        };
+    }
+
     /// Convert every assertion reference from recorder-local IDs to the
     /// persistent IDs accepted by causal graph queries. Call this while the
     /// managed runtime is live, after recording assertions and before publish.
