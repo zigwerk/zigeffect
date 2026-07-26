@@ -68,6 +68,7 @@ pub const Index = @import("index.zig");
 /// guarantees, so parent walks need no index and child lookups need one small
 /// CSR array instead of a scan.
 pub const Engine = @import("engine.zig");
+
 pub const default_path = ".zigeffect/graph";
 pub const default_wal_name = "causal-graph.jsonl";
 pub const default_max_records: usize = 65_536;
@@ -1818,6 +1819,56 @@ pub const Snapshot = struct {
 
     pub fn childrenAlloc(self: *const Snapshot, allocator: std.mem.Allocator, durable_event_id: u64) ![]u64 {
         return self.topology.childrenAlloc(allocator, durable_event_id);
+    }
+
+    /// One node's indexed columns, resolved.
+    ///
+    /// The storage engine exposes columns; it deliberately does not own a
+    /// predicate language. Deciding what "matches" is the query layer's job, so
+    /// this returns the materialised values and lets a caller compose them.
+    pub const NodeView = struct {
+        durable_event_id: u64,
+        session_id: u64,
+        label: []const u8,
+        kind: []const u8,
+        status: []const u8,
+        service_key: []const u8,
+        type_name: []const u8,
+        requirement_id: u64,
+        acceptance_check_id: u64,
+        scenario_id: u64,
+        run_id: u64,
+    };
+
+    pub fn nodeCount(self: *const Snapshot) usize {
+        return self.entries.len;
+    }
+
+    /// Columns for the node at `position`, without decoding the log.
+    ///
+    /// Null when this snapshot was opened by replay rather than from an index,
+    /// because then the semantic columns were never materialised. A caller that
+    /// needs them should say so rather than silently receive empty strings.
+    pub fn nodeAt(self: *const Snapshot, position: usize) ?NodeView {
+        if (position >= self.entries.len) return null;
+        const raw = self.index_raw orelse return null;
+        const view = Index.parse(raw) catch return null;
+        if (position >= view.entries.len) return null;
+        const entry = view.entries[position];
+        if (entry.durable_event_id != self.entries[position].durable_event_id) return null;
+        return .{
+            .durable_event_id = entry.durable_event_id,
+            .session_id = entry.session_id,
+            .label = view.text(entry.label_id) orelse "",
+            .kind = view.text(entry.kind_id) orelse "",
+            .status = view.text(entry.status_id) orelse "",
+            .service_key = view.text(entry.service_key_id) orelse "",
+            .type_name = view.text(entry.type_name_id) orelse "",
+            .requirement_id = entry.requirement_id,
+            .acceptance_check_id = entry.acceptance_check_id,
+            .scenario_id = entry.scenario_id,
+            .run_id = entry.run_id,
+        };
     }
 
     /// Everything this event caused, directly or transitively.
