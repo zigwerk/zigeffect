@@ -521,7 +521,7 @@ pub const executable_test =
     \\    defer context.deinit();
     \\    const layer = app.rootLayer();
     \\    // Test-only injection keeps assertions and the project graph on one runtime.
-    \\    var runtime = try zstd.ManagedRuntime(@TypeOf(layer)).make(std.testing.allocator, std.testing.io, std.Io.Dir.cwd(), layer, .{ .causal_store = context.causalStore() });
+    \\    var runtime = try zstd.ManagedRuntime(@TypeOf(layer)).make(std.testing.allocator, std.testing.io, std.Io.Dir.cwd(), layer, .{ .causal_store = context.causalStore(), .causal_context = context.causalContext() });
     \\    defer runtime.deinit();
     \\    try runtime.run(app.program(std.testing.io, std.Io.Dir.cwd()));
     \\    var inspection = try runtime.inspect(std.testing.allocator, .{ .max_recent_events = 128 });
@@ -668,7 +668,7 @@ pub const library_test =
     \\    const input = try library.decodeInputAlloc(std.testing.allocator, "{\"value\":21}");
     \\    const layer = library.defaultLayer();
     \\    // Test-only injection keeps assertions and the project graph on one runtime.
-    \\    var runtime = try zstd.ManagedRuntime(@TypeOf(layer)).make(std.testing.allocator, std.testing.io, std.Io.Dir.cwd(), layer, .{ .causal_store = context.causalStore() });
+    \\    var runtime = try zstd.ManagedRuntime(@TypeOf(layer)).make(std.testing.allocator, std.testing.io, std.Io.Dir.cwd(), layer, .{ .causal_store = context.causalStore(), .causal_context = context.causalContext() });
     \\    defer runtime.deinit();
     \\    const actual = try runtime.run(library.double(input.value));
     \\    var inspection = try runtime.inspect(std.testing.allocator, .{ .max_recent_events = 64 });
@@ -820,7 +820,7 @@ pub const system_test =
     \\    var context = try zstd.Testing.TestContext.initFromProject(std.testing.allocator, std.testing.io, std.Io.Dir.cwd(), .{ .project = "__PROJECT_NAME__", .suite = "system", .scenario = scenario });
     \\    defer context.deinit();
     \\    // Test-only injection keeps assertions and the project graph on one runtime.
-    \\    try system.runWithOptions(std.testing.allocator, std.testing.io, std.Io.Dir.cwd(), .{ .causal_store = context.causalStore() });
+    \\    try system.runWithOptions(std.testing.allocator, std.testing.io, std.Io.Dir.cwd(), .{ .causal_store = context.causalStore(), .causal_context = context.causalContext() });
     \\    const assertions = zstd.Testing.AssertionRecorder.init(&context);
     \\    try assertions.equal(.{ .id = "shared-contract", .label = "shared contract version" }, @as(u32, 1), system.shared.contract_version);
     \\    _ = try assertions.event(.{ .id = "component-causal", .label = "a child application executed through its managed runtime" }, .{ .kind = .effect_completed, .label = "Greeting.greet", .status = "success" });
@@ -927,6 +927,8 @@ pub const readme =
     \\zigeffect graph event <event-id> --json
     \\zigeffect graph children <event-id> --json
     \\zigeffect graph path <from-event-id> <to-event-id> --limit 128 --json
+    \\zigeffect graph find --label <operation> --status failure --json
+    \\zigeffect graph find --requirement <requirement-id> --status failure --json
     \\```
     \\
     \\The source of truth is `zigeffect.project.json`. Compatibility metadata and
@@ -938,7 +940,16 @@ pub const readme =
     \\WAL at `.zigeffect/graph/causal-graph.jsonl`; no daemon or container is
     \\required. Capture `newest_durable_event_id` from `graph status` before a
     \\change, then query `graph since` after its focused test to inspect exactly
-    \\what the change caused. The graph commands validate the manifest before
+    \\what the change caused. Use `graph find` to select rather than page: it
+    \\matches on label, kind, status, service key and the correlation ids, and
+    \\returns a flat projection so the identity you filtered on is readable
+    \\without decoding the node property blob a second time. It is a bounded
+    \\scan, so honour `scanned`, `matched`, `truncated` and `next_after_event_id`
+    \\rather than assuming one page is the whole answer; at least one filter is
+    \\required. Scenarios run through `zigeffect test run` stamp
+    \\`requirement_id`, `acceptance_check_id` and `scenario_id` onto every node
+    \\they produce, which is what makes `--requirement` select the evidence for
+    \\one acceptance check across sessions. The graph commands validate the manifest before
     \\opening that artifact. For a system root, add
     \\`--component <manifest-component-id>` to graph queries.
     \\Test scenarios bind requirements to deterministic seeds, fault profiles,
@@ -1138,14 +1149,29 @@ pub const skill =
     \\  Application code never calls `runIn`, `ctx.runEffect`, `layerGraph`,
     \\  manually attaches a causal backend, or uses environment-parameterized
     \\  effects.
-    \\- Application acceptance tests pass `context.causalStore()` only to the
-    \\  one root `zstd.ManagedRuntime`, assert the real execution, call
+    \\- Application acceptance tests pass `context.causalStore()` and
+    \\  `context.causalContext()` only to the one root `zstd.ManagedRuntime`.
+    \\  The context stamps requirement, acceptance check and scenario identity
+    \\  onto every node the run produces, which is what lets an agent later
+    \\  select that evidence with `graph find --requirement`. Assert the real
+    \\  execution, call
     \\  `context.mapCausalEventIds(&runtime)` while it is live, then shut down
     \\  and publish. Mount the runtime at the owning project or component root
     \\  and query at least one mapped ID through the project-mounted graph before
     \\  publishing. Do not create a synthetic receipt beside a detached graph.
     \\- Use `zigeffect add` and `zigeffect generate` before hand-writing framework
     \\  structure.
+    \\- Describe a service method as an effect with
+    \\  `zstd.Service.Delegate(Tag, "method", "Stable.Label")` instead of
+    \\  hand-rolling an Effect/Stateful/NamedEffect triple. Success, failure and
+    \\  argument types are read off the method, so the description cannot drift
+    \\  from the implementation; the label stays explicit because it is the
+    \\  identity the causal graph is queried by. Write the effect out by hand
+    \\  only when the operation is more than delegation.
+    \\- Publish a layer's type next to its constructor using
+    \\  `kernel.Layer.Sync`/`Scoped`/`Succeed`/`ProvideMerge`/`MergeAll` rather
+    \\  than restating the composition inside `@TypeOf`. Downstream code then
+    \\  names the type instead of repeating the expression that produced it.
     \\- Use standard-library, transport and framework adapters for external,
     \\  workflow, statechart and artifact facts; they record automatically.
     \\  Application code adds only genuinely domain-specific typed events. Use

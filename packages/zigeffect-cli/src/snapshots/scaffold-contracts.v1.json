@@ -2,13 +2,13 @@
   "schema": "zigeffect.scaffold-contract-snapshot.v1",
   "schema_version": 1,
   "template_schema": "zigeffect.scaffold-template.v1",
-  "template_version": 16,
+  "template_version": 17,
   "project": "snapshot-project",
   "cases": [
-    { "kind": "application", "files": 19, "sha256": "sha256:d29f1e79b0be5d7dab50f3f02704be928963c7bc9a2edc8f6453a6ec2d89799c" },
-    { "kind": "service", "files": 19, "sha256": "sha256:32da9fd2b7d895cc0ee2942bc8c26b5c20305352049bc126a6583e02ecae206c" },
-    { "kind": "library", "files": 13, "sha256": "sha256:33a5365c929672339f0d279f76a0f04254e180feb7ff79dcd8523c30561f497e" },
-    { "kind": "package", "files": 14, "sha256": "sha256:b67de9fa4beb7de1e8cdadd422a056e1ec39d3781e9cb26d524ea65f540d142e" },
-    { "kind": "system", "files": 40, "sha256": "sha256:131e0eceede814bde6a6dfca03ad7f73809bef838c1149685eacacbb91d184e7" }
+    { "kind": "application", "files": 19, "sha256": "sha256:10a7982256e37a318276fec3840a110713e75a957960cf10fc763638e6c093f0" },
+    { "kind": "service", "files": 19, "sha256": "sha256:34e3b6792d7c7dd2f1e130708185a4ab0da98967f00c12b5bad00ff8babe8754" },
+    { "kind": "library", "files": 13, "sha256": "sha256:5087f2d20c35da618f894d69700aa60ac825c229819094d93b3b061e579d634a" },
+    { "kind": "package", "files": 14, "sha256": "sha256:7f1eaa9a98980c6bec00abe6074c2c6d1321841327f14c842c26ca99a836e2b1" },
+    { "kind": "system", "files": 40, "sha256": "sha256:e5422dd793b412725bcbc0d6aaca75e3d7980280cd4925c29d557eaab5a22281" }
   ]
 }
