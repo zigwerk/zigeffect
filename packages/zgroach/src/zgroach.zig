@@ -15,6 +15,9 @@ const fx = @import("zigeffect");
 
 pub const Allocator = std.mem.Allocator;
 
+/// What a plan is written against: node kinds, typed fields, and directional
+/// relations. Keeps store vocabulary out of the plan.
+pub const Schema = @import("schema.zig");
 /// Backend-neutral query plan. Pure data: build it anywhere, validate it on
 /// arrival, lower it wherever.
 pub const Plan = @import("plan.zig");
@@ -23,6 +26,7 @@ pub const Backend = @import("backend.zig");
 
 pub const backends = struct {
     pub const embedded = @import("backends/embedded.zig");
+    pub const cockroach = @import("backends/cockroach.zig");
 };
 pub const Effect = fx;
 
@@ -77,7 +81,9 @@ test {
     // `pub const X = @import(...)` is lazily analysed, so without this the
     // package's tests compile and silently never run — which is exactly what
     // happened before this block existed.
+    _ = @import("schema.zig");
     _ = @import("plan.zig");
     _ = @import("backend.zig");
     _ = @import("backends/embedded.zig");
+    _ = @import("backends/cockroach.zig");
 }
