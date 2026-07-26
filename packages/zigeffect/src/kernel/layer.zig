@@ -421,6 +421,31 @@ pub fn ProvidedLayer(comptime Dependent: type, comptime Dependency: type, compti
 }
 
 pub const Layer = struct {
+    // The type of a composed layer is determined entirely by its inputs, but a
+    // function cannot infer its own return type, so every layer constructor
+    // would otherwise have to restate its whole body inside `@TypeOf(...)` — and
+    // each consumer restate it again to name what it received. Exposing the type
+    // constructors alongside the value constructors lets a module publish its
+    // layer type once and everything downstream refer to that name instead.
+    pub const Empty = EmptyLayer;
+    pub const Succeed = SucceedLayer;
+    pub const Sync = SyncLayer;
+    pub const Scoped = ScopedLayer;
+    pub const Merged = MergedLayer;
+    pub const Provided = ProvidedLayer;
+
+    /// The type of `a.provideMerge(b)`, which is how a dependent layer is
+    /// composed with the layer that satisfies it.
+    pub fn ProvideMerge(comptime Dependent: type, comptime Dependency: type) type {
+        return ProvidedLayer(Dependent, Dependency, true);
+    }
+
+    /// The type of `Layer.mergeAll(.{ a, b, ... })`, named from the layer types
+    /// rather than from a tuple value that does not exist yet.
+    pub fn MergeAll(comptime layers: []const type) type {
+        return MergedLayer(std.meta.Tuple(layers));
+    }
+
     pub fn empty() EmptyLayer {
         return .{};
     }

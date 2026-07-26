@@ -8970,18 +8970,32 @@ pub const Application = struct {
 
     /// Generated routes plus all three bounded registries. This smaller facade
     /// is useful for in-process contract tests that do not open a listener.
+    /// Type of `routesLayer`, named from its inputs.
+    ///
+    /// Published so an application can declare what it composes without
+    /// restating this expression inside `@TypeOf` — and so this function does
+    /// not have to state its own body twice.
+    pub fn RoutesLayer(
+        comptime Service: type,
+        comptime ImplementationService: type,
+        comptime Dependencies: type,
+    ) type {
+        return zstd.fx.kernel.Layer.ProvideMerge(
+            @TypeOf(Typed.generatedRoutesLayer(Service, ImplementationService)),
+            zstd.fx.kernel.Layer.MergeAll(&.{
+                Dependencies,
+                @TypeOf(Typed.unaryRegistryLayer()),
+                @TypeOf(Typed.streamingRegistryLayer()),
+                @TypeOf(Typed.incrementalRegistryLayer()),
+            }),
+        );
+    }
+
     pub fn routesLayer(
         comptime Service: type,
         comptime ImplementationService: type,
         dependencies: anytype,
-    ) @TypeOf(Typed.generatedRoutesLayer(Service, ImplementationService).provideMerge(
-        zstd.fx.kernel.Layer.mergeAll(.{
-            dependencies,
-            Typed.unaryRegistryLayer(),
-            Typed.streamingRegistryLayer(),
-            Typed.incrementalRegistryLayer(),
-        }),
-    )) {
+    ) RoutesLayer(Service, ImplementationService, @TypeOf(dependencies)) {
         const foundations = zstd.fx.kernel.Layer.mergeAll(.{
             dependencies,
             Typed.unaryRegistryLayer(),
@@ -8993,27 +9007,35 @@ pub const Application = struct {
 
     /// Complete live layer for one generated service. Additional application
     /// services belong in `dependencies`; transport internals do not.
+    /// Type of `layer`, named from its inputs. See `RoutesLayer`.
+    pub fn Layer(
+        comptime Service: type,
+        comptime ImplementationService: type,
+        comptime Dependencies: type,
+    ) type {
+        const kernel_layer = zstd.fx.kernel.Layer;
+        const ConfiguredRoutes = kernel_layer.MergeAll(&.{
+            RoutesLayer(Service, ImplementationService, Dependencies),
+            @TypeOf(StandardServices.configLayer(undefined)),
+            @TypeOf(nativeServerConfigLayer(undefined)),
+            @TypeOf(nativeChannelzConfigLayer(undefined)),
+        });
+        const Standards = kernel_layer.ProvideMerge(@TypeOf(StandardServices.layer()), ConfiguredRoutes);
+        const Server = kernel_layer.ProvideMerge(@TypeOf(nativeServerLayer()), Standards);
+        const Transport = kernel_layer.ProvideMerge(@TypeOf(nativeChannelzLayer()), Server);
+        return kernel_layer.MergeAll(&.{
+            Transport,
+            @TypeOf(zstd.Application.Lifecycle.managerLayer()),
+            @TypeOf(zstd.Application.Lifecycle.signalLayer()),
+        });
+    }
+
     pub fn layer(
         comptime Service: type,
         comptime ImplementationService: type,
         dependencies: anytype,
         config: Config,
-    ) @TypeOf(zstd.fx.kernel.Layer.mergeAll(.{
-        nativeChannelzLayer().provideMerge(
-            nativeServerLayer().provideMerge(
-                StandardServices.layer().provideMerge(
-                    zstd.fx.kernel.Layer.mergeAll(.{
-                        routesLayer(Service, ImplementationService, dependencies),
-                        StandardServices.configLayer(standardConfig(Service, config)),
-                        nativeServerConfigLayer(config.server),
-                        nativeChannelzConfigLayer(channelzConfig(config)),
-                    }),
-                ),
-            ),
-        ),
-        zstd.Application.Lifecycle.managerLayer(),
-        zstd.Application.Lifecycle.signalLayer(),
-    })) {
+    ) Layer(Service, ImplementationService, @TypeOf(dependencies)) {
         const configured_routes = zstd.fx.kernel.Layer.mergeAll(.{
             routesLayer(Service, ImplementationService, dependencies),
             StandardServices.configLayer(standardConfig(Service, config)),

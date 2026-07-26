@@ -116,6 +116,10 @@ pub const Batch = struct { signal: Signal, payload: []const u8 };
 pub const AttributeValue = union(enum) {
     string: []const u8,
     int: i64,
+    /// OTLP `AnyValue.boolValue`. Causal facts carry genuine booleans, and
+    /// flattening them to 0/1 or "true"/"false" would lose the type at the
+    /// collector.
+    bool: bool,
 };
 
 pub const Attribute = struct {
@@ -749,7 +753,7 @@ fn validateAttributes(attributes: []const Attribute, policy: AttributePolicy) !v
         if (attribute.key.len == 0 or attribute.key.len > 256 or containsControl(attribute.key)) return error.InvalidTelemetryAttribute;
         switch (attribute.value) {
             .string => |value| if (value.len > policy.max_value_bytes or containsControl(value)) return error.InvalidTelemetryAttribute,
-            .int => {},
+            .int, .bool => {},
         }
     }
 }
@@ -774,6 +778,10 @@ fn writeAttribute(writer: *std.Io.Writer, attribute: Attribute) !void {
             try writer.writeAll("\"intValue\":");
             var buffer: [32]u8 = undefined;
             try std.json.Stringify.value(try std.fmt.bufPrint(&buffer, "{d}", .{value}), .{}, writer);
+        },
+        .bool => |value| {
+            try writer.writeAll("\"boolValue\":");
+            try writer.writeAll(if (value) "true" else "false");
         },
     }
     try writer.writeAll("}}");
@@ -1221,4 +1229,203 @@ pub fn shutdownExporterEffect() ShutdownExporterEffect {
             _ = zstd.Service.completeOperation(ctx, operation, "success", "exporter scope drained");
         }
     }.run);
+}
+
+/// Forward runtime-recorded causal facts to the OTLP exporter as spans.
+///
+/// The kernel already turns causal events into `CausalOtelRecord`s and the
+/// exporter already speaks OTLP, but nothing joined them, so a service could
+/// record a complete causal graph and still export no telemetry. This is that
+/// join: attach `CausalOtelBackendState` to the runtime's causal store and drain
+/// it through here, and an application gets spans without writing any
+/// instrumentation of its own.
+///
+/// Only `span_event` records become spans; log-shaped records are left for the
+/// log path rather than being forced into a span. Records without a trace
+/// identity are skipped instead of being exported under a fabricated one — an
+/// unjoinable span is worse than an absent one.
+pub const CausalSpanBridge = struct {
+    /// Causal events are points, not intervals, so a span carries the same
+    /// start and end instant. `observed_at` is not on the record, so the caller
+    /// supplies the timestamp it wants the batch attributed to.
+    pub fn drain(
+        exporter: *Exporter,
+        service_name: []const u8,
+        records: []const zstd.fx.CausalOtelRecord,
+        timestamp_unix_nanos: u64,
+        scratch: std.mem.Allocator,
+    ) !usize {
+        // Per-record scratch: attribute rendering allocates, and the exporter
+        // serializes each span before returning, so nothing outlives one loop
+        // iteration.
+        var arena = std.heap.ArenaAllocator.init(scratch);
+        defer arena.deinit();
+
+        var exported: usize = 0;
+        for (records) |record| {
+            if (record.signal != .span_event) continue;
+            const trace_hex = record.trace_id_hex orelse continue;
+            const span_hex = record.span_id_hex orelse continue;
+            _ = arena.reset(.retain_capacity);
+            const scoped = arena.allocator();
+
+            var attributes: std.ArrayList(Attribute) = .empty;
+            for (record.attributes) |item| {
+                try attributes.append(scoped, .{
+                    .key = item.key,
+                    .value = switch (item.value) {
+                        .string => |value| AttributeValue{ .string = value },
+                        // Causal identifiers are opaque 64-bit values — trace
+                        // halves, requirement and scenario ids — and routinely
+                        // exceed i64. OTLP's intValue is signed, so anything
+                        // that does not fit is rendered as a decimal string
+                        // rather than truncated, reinterpreted as negative, or
+                        // crashing the export.
+                        .u64 => |value| if (std.math.cast(i64, value)) |fits|
+                            AttributeValue{ .int = fits }
+                        else
+                            AttributeValue{ .string = try std.fmt.allocPrint(scoped, "{d}", .{value}) },
+                        .bool => |value| AttributeValue{ .bool = value },
+                    },
+                });
+            }
+
+            const failed = if (record.attribute("zigeffect.causal.status")) |value| switch (value) {
+                .string => |text| std.mem.eql(u8, text, "failure"),
+                else => false,
+            } else false;
+
+            try exporter.enqueueSpan(.{
+                .service_name = service_name,
+                .trace_id = &trace_hex,
+                .span_id = &span_hex,
+                .name = record.name,
+                .start_time_unix_nanos = timestamp_unix_nanos,
+                .end_time_unix_nanos = timestamp_unix_nanos,
+                .status_error = failed,
+                .attributes = attributes.items,
+            });
+            exported += 1;
+        }
+        return exported;
+    }
+};
+
+test "runtime causal facts reach a live collector as spans without app instrumentation" {
+    const Collector = struct {
+        io: std.Io,
+        listener: *std.Io.net.Server,
+        requests: usize = 0,
+        saw_span_name: bool = false,
+        saw_trace_id: bool = false,
+        saw_bool_attribute: bool = false,
+        failure: ?anyerror = null,
+
+        fn run(self: *@This()) void {
+            self.serve() catch |err| {
+                self.failure = err;
+            };
+        }
+        fn serve(self: *@This()) !void {
+            while (self.requests < 1) {
+                var stream = try self.listener.accept(self.io);
+                defer stream.close(self.io);
+                var buffer: [65536]u8 = undefined;
+                var length: usize = 0;
+                // Read headers, then exactly Content-Length body bytes. Breaking
+                // on the header terminator alone would leave the span payload
+                // unread, and reading past the body blocks until the deadline.
+                var body_start: ?usize = null;
+                var content_length: usize = 0;
+                while (length < buffer.len) {
+                    var parts = [_][]u8{buffer[length..]};
+                    const count = try self.io.vtable.netRead(self.io.userdata, stream.socket.handle, &parts);
+                    if (count == 0) break;
+                    length += count;
+                    if (body_start == null) {
+                        if (std.mem.indexOf(u8, buffer[0..length], "\r\n\r\n")) |end| {
+                            body_start = end + 4;
+                            const headers = buffer[0..end];
+                            if (std.mem.indexOf(u8, headers, "Content-Length: ")) |at| {
+                                const rest = headers[at + "Content-Length: ".len ..];
+                                const stop = std.mem.indexOfScalar(u8, rest, '\r') orelse rest.len;
+                                content_length = std.fmt.parseInt(usize, rest[0..stop], 10) catch 0;
+                            }
+                        }
+                    }
+                    if (body_start) |start| {
+                        if (length - start >= content_length) break;
+                    }
+                }
+                const request = buffer[0..length];
+                if (!std.mem.startsWith(u8, request, "POST /v1/traces ")) return error.UnexpectedOtlpPath;
+                if (std.mem.indexOf(u8, request, "zigeffect.causal.effect_completed") != null) self.saw_span_name = true;
+                // The 128-bit trace id originated at the boundary must survive
+                // to the collector, or the span cannot be joined to the graph.
+                if (std.mem.indexOf(u8, request, "000000000000002a000000000000007b") != null) self.saw_trace_id = true;
+                if (std.mem.indexOf(u8, request, "\"boolValue\":") != null) self.saw_bool_attribute = true;
+                try writeAll(stream, self.io, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}");
+                self.requests += 1;
+            }
+        }
+    };
+
+    var listener: ?std.Io.net.Server = null;
+    var port: u16 = 19760;
+    while (port < 19790) : (port += 1) {
+        const address = try std.Io.net.IpAddress.parseIp4("127.0.0.1", port);
+        listener = address.listen(std.testing.io, .{ .reuse_address = true }) catch |err| switch (err) {
+            error.AddressInUse => continue,
+            else => return err,
+        };
+        break;
+    }
+    if (listener == null) return error.NoLoopbackPort;
+    defer listener.?.deinit(std.testing.io);
+    var collector = Collector{ .io = std.testing.io, .listener = &listener.? };
+    const thread = try std.Thread.spawn(.{}, Collector.run, .{&collector});
+
+    // Drive the real pipeline: a causal store whose backend is the kernel's OTel
+    // projection, exactly as a managed runtime fans out to it.
+    var backend_state = zstd.fx.CausalOtelBackendState.init(std.testing.allocator, .{});
+    defer backend_state.deinit();
+    var store = zstd.fx.CausalStore.init(std.testing.allocator);
+    defer store.deinit();
+    _ = store.replaceBackend(backend_state.backend());
+
+    // Exactly one span-shaped fact, because the exporter sends one request per
+    // span and the collector below answers a known number of them.
+    _ = try store.record(.{
+        .id = 1,
+        .kind = .effect_completed,
+        .label = "TodoService.create",
+        .status = "failure",
+        .service_key = "application/TodoService",
+        .context = .{ .trace_id_high = 42, .trace_id_low = 123, .span_id = 7 },
+    });
+
+    var exporter = try Exporter.init(std.testing.allocator, std.testing.io, .{ .port = port, .retry_attempts = 0 });
+    defer exporter.deinit();
+    const exported = try CausalSpanBridge.drain(
+        &exporter,
+        "todo-grpc-backend",
+        backend_state.recordedRecords(),
+        1_700_000_000_000_000_000,
+        std.testing.allocator,
+    );
+    try std.testing.expectEqual(@as(usize, 1), exported);
+    try exporter.flush();
+
+    thread.join();
+    if (collector.failure) |err| return err;
+    try std.testing.expectEqual(@as(usize, 1), collector.requests);
+    try std.testing.expect(collector.saw_span_name);
+    try std.testing.expect(collector.saw_trace_id);
+}
+
+test "OTLP attributes encode booleans as boolValue rather than flattening them" {
+    var buffer: [256]u8 = undefined;
+    var writer = std.Io.Writer.fixed(&buffer);
+    try writeAttribute(&writer, .{ .key = "zigeffect.causal.sampled", .value = .{ .bool = true } });
+    try std.testing.expect(std.mem.indexOf(u8, writer.buffered(), "\"boolValue\":true") != null);
 }
