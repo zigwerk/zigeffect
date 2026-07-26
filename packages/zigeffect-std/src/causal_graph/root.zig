@@ -18,6 +18,11 @@ pub const lineage_schema = "zigeffect.causal.local-graph-lineage.v1";
 pub const lineage_schema_version: u32 = 1;
 pub const find_schema = "zigeffect.causal.local-graph-find.v1";
 pub const find_schema_version: u32 = 1;
+
+/// Derived, disposable index over the durable log. Nothing reads it yet; it is
+/// introduced ahead of its readers so the format can be reviewed and tested in
+/// isolation, and so a defect in it cannot affect a query result.
+pub const Index = @import("index.zig");
 pub const default_path = ".zigeffect/graph";
 pub const default_wal_name = "causal-graph.jsonl";
 pub const default_max_records: usize = 65_536;
