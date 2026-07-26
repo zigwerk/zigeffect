@@ -719,7 +719,7 @@ pub const LocalDatabase = struct {
         for (self.entries.items[cut..], 0..) |entry, index| {
             if (entry.offset + entry.length > content.len) return error.CorruptGraph;
             const line = content[entry.offset .. entry.offset + entry.length];
-            var parsed = std.json.parseFromSlice(PersistedRecord, self.allocator, line, .{ .allocate = .alloc_always }) catch
+            var parsed = std.json.parseFromSlice(PersistedRecord, self.allocator, line, .{ .allocate = .alloc_always, .ignore_unknown_fields = true }) catch
                 return error.CorruptGraph;
             defer parsed.deinit();
             var record = parsed.value;
@@ -790,7 +790,7 @@ pub const LocalDatabase = struct {
         var line_start: usize = 0;
         while (std.mem.indexOfScalarPos(u8, content, line_start, '\n')) |newline| {
             const line = content[line_start..newline];
-            var parsed = std.json.parseFromSlice(PersistedRecord, self.allocator, line, .{ .allocate = .alloc_always }) catch return error.CorruptGraph;
+            var parsed = std.json.parseFromSlice(PersistedRecord, self.allocator, line, .{ .allocate = .alloc_always, .ignore_unknown_fields = true }) catch return error.CorruptGraph;
             defer parsed.deinit();
             _ = self.nendb.addNode(parsed.value.node.id, parsed.value.node.kind) catch return error.CorruptGraph;
             if (parsed.value.parent_edge) |edge| {
@@ -1037,7 +1037,7 @@ fn appendFindRowIfMatch(
     filter: FindFilter,
     separate: bool,
 ) !bool {
-    var persisted = std.json.parseFromSlice(PersistedRecord, allocator, row, .{ .allocate = .alloc_always }) catch
+    var persisted = std.json.parseFromSlice(PersistedRecord, allocator, row, .{ .allocate = .alloc_always, .ignore_unknown_fields = true }) catch
         return error.CorruptGraph;
     defer persisted.deinit();
     var properties = std.json.parseFromSlice(
@@ -1102,7 +1102,7 @@ fn persistedRowContainsLineage(
     row: []const u8,
     reference: fx.Lineage.Ref,
 ) !bool {
-    var persisted = std.json.parseFromSlice(PersistedRecord, allocator, row, .{ .allocate = .alloc_always }) catch
+    var persisted = std.json.parseFromSlice(PersistedRecord, allocator, row, .{ .allocate = .alloc_always, .ignore_unknown_fields = true }) catch
         return error.CorruptGraph;
     defer persisted.deinit();
     var properties = std.json.parseFromSlice(
@@ -1367,7 +1367,7 @@ fn scanContent(allocator: std.mem.Allocator, content: []const u8, options: Optio
         if (line.len == 0 or line.len > options.max_record_bytes or result.entries.items.len >= options.max_records) {
             return error.CorruptGraph;
         }
-        var parsed = std.json.parseFromSlice(PersistedRecord, allocator, line, .{ .allocate = .alloc_always }) catch return error.CorruptGraph;
+        var parsed = std.json.parseFromSlice(PersistedRecord, allocator, line, .{ .allocate = .alloc_always, .ignore_unknown_fields = true }) catch return error.CorruptGraph;
         defer parsed.deinit();
         parsed.value.validate() catch |err| switch (err) {
             error.SecretDetected => return error.SecretDetected,
@@ -1877,6 +1877,75 @@ test "durable causal graph returns bounded paginated typed lineage records" {
     defer std.testing.allocator.free(second_page);
     try std.testing.expect(std.mem.indexOf(u8, second_page, "matching-end") != null);
     try std.testing.expect(std.mem.indexOf(u8, second_page, "matching-start") == null);
+}
+
+test "causal graph readers tolerate records written by a newer writer" {
+    // The record schema will need to grow. Every reader here parses the durable
+    // record directly, so without unknown-field tolerance a single added field
+    // would make every existing graph unreadable — and because the failure lands
+    // in LocalDatabase.init inside ManagedRuntime.make, affected processes would
+    // not start at all. zgraphy's out-of-tree parser already tolerates unknown
+    // fields; this proves the owning reader does too.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    {
+        var database = try LocalDatabase.init(std.testing.allocator, std.testing.io, tmp.dir, .{});
+        defer database.deinit();
+        const events = [_]fx.CausalEvent{
+            .{ .id = 1, .kind = .run_started, .label = "before-upgrade" },
+            .{ .id = 2, .kind = .run_completed, .parent_id = 1, .label = "after-upgrade" },
+        };
+        for (events) |event| {
+            var write = try fx.mapCausalEventToNendbWrite(std.testing.allocator, event);
+            defer fx.deinitCausalNendbWrite(std.testing.allocator, &write);
+            try database.appendWrite(write);
+        }
+        try database.flush();
+    }
+
+    // Simulate a newer writer: inject a field this build has never heard of,
+    // at both the record and the node level.
+    var graph_dir = try tmp.dir.openDir(std.testing.io, default_path, .{ .follow_symlinks = false });
+    defer graph_dir.close(std.testing.io);
+    const original = try graph_dir.readFileAlloc(std.testing.io, default_wal_name, std.testing.allocator, .limited(1 << 20));
+    defer std.testing.allocator.free(original);
+
+    var upgraded: std.ArrayList(u8) = .empty;
+    defer upgraded.deinit(std.testing.allocator);
+    var lines = std.mem.splitScalar(u8, original, '\n');
+    while (lines.next()) |line| {
+        if (line.len == 0) continue;
+        try upgraded.appendSlice(std.testing.allocator, line[0 .. line.len - 1]);
+        try upgraded.appendSlice(std.testing.allocator, ",\"future_record_field\":42}");
+        try upgraded.append(std.testing.allocator, '\n');
+    }
+    {
+        var file = try graph_dir.createFile(std.testing.io, default_wal_name, .{ .truncate = true, .resolve_beneath = true });
+        defer file.close(std.testing.io);
+        try file.writePositionalAll(std.testing.io, upgraded.items, 0);
+        try file.sync(std.testing.io);
+    }
+
+    // Reopening must succeed and preserve every fact, not fail with CorruptGraph.
+    var reopened = try LocalDatabase.init(std.testing.allocator, std.testing.io, tmp.dir, .{});
+    defer reopened.deinit();
+    try std.testing.expectEqual(@as(usize, 2), reopened.recordCount());
+
+    const records = try reopened.recordsAfterJsonAlloc(std.testing.allocator, 0, 8);
+    defer std.testing.allocator.free(records);
+    try std.testing.expect(std.mem.indexOf(u8, records, "before-upgrade") != null);
+    try std.testing.expect(std.mem.indexOf(u8, records, "after-upgrade") != null);
+
+    // The read-only snapshot path the CLI uses must tolerate it too.
+    var snapshot = try Snapshot.open(std.testing.allocator, std.testing.io, tmp.dir, .{});
+    defer snapshot.deinit();
+    try std.testing.expectEqual(@as(usize, 2), snapshot.summary().records);
+
+    // And selection, which decodes both the record and its property blob.
+    const found = try snapshot.findRecordsJsonAlloc(std.testing.allocator, .{ .label = "after-upgrade" }, 0, 8, 8);
+    defer std.testing.allocator.free(found);
+    try std.testing.expect(std.mem.indexOf(u8, found, "\"matched\":1") != null);
 }
 
 test "causal graph retention drops oldest sessions instead of failing closed" {
