@@ -10,6 +10,15 @@ fn addV2Test(b: *std.Build, runner: std.Build.LazyPath, options: std.Build.TestO
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    // Tests default to ReleaseSafe; binaries keep -Doptimize. A bare
+    // `zig build test` in Debug spends most of its time in the harness, which
+    // captures ten stack frames per allocation in every optimize mode.
+    // -Dtest-optimize=Debug restores those traces.
+    const test_optimize = b.option(
+        std.builtin.OptimizeMode,
+        "test-optimize",
+        "Optimize mode for test artifacts (default ReleaseSafe)",
+    ) orelse .ReleaseSafe;
 
     const zig_webui = b.dependency("zig_webui", .{
         .target = target,
@@ -33,7 +42,7 @@ pub fn build(b: *std.Build) void {
     const tests = b.createModule(.{
         .root_source_file = b.path("test/all_test.zig"),
         .target = target,
-        .optimize = optimize,
+        .optimize = test_optimize,
     });
     tests.addImport("zigeffect", zigeffect);
 
@@ -78,7 +87,7 @@ pub fn build(b: *std.Build) void {
     const public_api_stability_test_module = b.createModule(.{
         .root_source_file = b.path("test/public_api_stability_test.zig"),
         .target = target,
-        .optimize = optimize,
+        .optimize = test_optimize,
     });
     public_api_stability_test_module.addImport("zigeffect", zigeffect);
 
@@ -93,7 +102,7 @@ pub fn build(b: *std.Build) void {
     const causal_backend_conformance_test_module = b.createModule(.{
         .root_source_file = b.path("test/causal_backend_conformance_test.zig"),
         .target = target,
-        .optimize = optimize,
+        .optimize = test_optimize,
     });
     causal_backend_conformance_test_module.addImport("zigeffect", zigeffect);
 
@@ -108,7 +117,7 @@ pub fn build(b: *std.Build) void {
     const storage_conformance_test_module = b.createModule(.{
         .root_source_file = b.path("test/storage_conformance_test.zig"),
         .target = target,
-        .optimize = optimize,
+        .optimize = test_optimize,
     });
     storage_conformance_test_module.addImport("zigeffect", zigeffect);
 
@@ -123,7 +132,7 @@ pub fn build(b: *std.Build) void {
     const property_history_test_module = b.createModule(.{
         .root_source_file = b.path("test/property_history_test.zig"),
         .target = target,
-        .optimize = optimize,
+        .optimize = test_optimize,
     });
     property_history_test_module.addImport("zigeffect", zigeffect);
 
@@ -136,7 +145,7 @@ pub fn build(b: *std.Build) void {
     const crash_recovery_property_test_module = b.createModule(.{
         .root_source_file = b.path("test/crash_recovery_property_test.zig"),
         .target = target,
-        .optimize = optimize,
+        .optimize = test_optimize,
     });
     crash_recovery_property_test_module.addImport("zigeffect", zigeffect);
 
@@ -149,7 +158,7 @@ pub fn build(b: *std.Build) void {
     const message_history_property_test_module = b.createModule(.{
         .root_source_file = b.path("test/message_history_property_test.zig"),
         .target = target,
-        .optimize = optimize,
+        .optimize = test_optimize,
     });
     message_history_property_test_module.addImport("zigeffect", zigeffect);
 
@@ -162,7 +171,7 @@ pub fn build(b: *std.Build) void {
     const scheduler_fairness_property_test_module = b.createModule(.{
         .root_source_file = b.path("test/scheduler_fairness_property_test.zig"),
         .target = target,
-        .optimize = optimize,
+        .optimize = test_optimize,
     });
     scheduler_fairness_property_test_module.addImport("zigeffect", zigeffect);
 
@@ -181,7 +190,7 @@ pub fn build(b: *std.Build) void {
     const performance_benchmark_test_module = b.createModule(.{
         .root_source_file = b.path("test/performance_benchmark_test.zig"),
         .target = target,
-        .optimize = optimize,
+        .optimize = test_optimize,
     });
     performance_benchmark_test_module.addImport("zigeffect", zigeffect);
 
@@ -194,7 +203,7 @@ pub fn build(b: *std.Build) void {
     const resource_bounds_test_module = b.createModule(.{
         .root_source_file = b.path("test/resource_bounds_test.zig"),
         .target = target,
-        .optimize = optimize,
+        .optimize = test_optimize,
     });
     resource_bounds_test_module.addImport("zigeffect", zigeffect);
 
@@ -207,7 +216,7 @@ pub fn build(b: *std.Build) void {
     const workflow_snapshot_frequency_test_module = b.createModule(.{
         .root_source_file = b.path("test/workflow_snapshot_frequency_test.zig"),
         .target = target,
-        .optimize = optimize,
+        .optimize = test_optimize,
     });
     workflow_snapshot_frequency_test_module.addImport("zigeffect", zigeffect);
 
@@ -220,7 +229,7 @@ pub fn build(b: *std.Build) void {
     const cluster_observability_test_module = b.createModule(.{
         .root_source_file = b.path("test/cluster_observability_test.zig"),
         .target = target,
-        .optimize = optimize,
+        .optimize = test_optimize,
     });
     cluster_observability_test_module.addImport("zigeffect", zigeffect);
 
@@ -239,7 +248,7 @@ pub fn build(b: *std.Build) void {
     const causal_jsonl_backend_test_module = b.createModule(.{
         .root_source_file = b.path("test/causal_jsonl_backend_test.zig"),
         .target = target,
-        .optimize = optimize,
+        .optimize = test_optimize,
     });
     causal_jsonl_backend_test_module.addImport("zigeffect", zigeffect);
 
@@ -254,7 +263,7 @@ pub fn build(b: *std.Build) void {
     const causal_dot_backend_test_module = b.createModule(.{
         .root_source_file = b.path("test/causal_dot_backend_test.zig"),
         .target = target,
-        .optimize = optimize,
+        .optimize = test_optimize,
     });
     causal_dot_backend_test_module.addImport("zigeffect", zigeffect);
 
@@ -269,7 +278,7 @@ pub fn build(b: *std.Build) void {
     const causal_otel_backend_test_module = b.createModule(.{
         .root_source_file = b.path("test/causal_otel_backend_test.zig"),
         .target = target,
-        .optimize = optimize,
+        .optimize = test_optimize,
     });
     causal_otel_backend_test_module.addImport("zigeffect", zigeffect);
 
@@ -284,7 +293,7 @@ pub fn build(b: *std.Build) void {
     const causal_graph_history_backend_test_module = b.createModule(.{
         .root_source_file = b.path("test/causal_graph_history_backend_test.zig"),
         .target = target,
-        .optimize = optimize,
+        .optimize = test_optimize,
     });
     causal_graph_history_backend_test_module.addImport("zigeffect", zigeffect);
 
@@ -299,7 +308,7 @@ pub fn build(b: *std.Build) void {
     const causal_nendb_storage_backend_test_module = b.createModule(.{
         .root_source_file = b.path("test/causal_nendb_storage_backend_test.zig"),
         .target = target,
-        .optimize = optimize,
+        .optimize = test_optimize,
     });
     causal_nendb_storage_backend_test_module.addImport("zigeffect", zigeffect);
 
@@ -314,7 +323,7 @@ pub fn build(b: *std.Build) void {
     const causal_async_stream_backend_test_module = b.createModule(.{
         .root_source_file = b.path("test/causal_async_stream_backend_test.zig"),
         .target = target,
-        .optimize = optimize,
+        .optimize = test_optimize,
     });
     causal_async_stream_backend_test_module.addImport("zigeffect", zigeffect);
 
@@ -329,7 +338,7 @@ pub fn build(b: *std.Build) void {
     const causal_app_runtime_test_module = b.createModule(.{
         .root_source_file = b.path("test/causal_app_runtime_test.zig"),
         .target = target,
-        .optimize = optimize,
+        .optimize = test_optimize,
     });
     causal_app_runtime_test_module.addImport("zigeffect", zigeffect);
 

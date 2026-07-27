@@ -17,6 +17,15 @@ fn addV2Test(b: *std.Build, runner: std.Build.LazyPath, options: std.Build.TestO
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    // Tests default to ReleaseSafe; binaries keep -Doptimize. A bare
+    // `zig build test` in Debug spends most of its time in the harness, which
+    // captures ten stack frames per allocation in every optimize mode.
+    // -Dtest-optimize=Debug restores those traces.
+    const test_optimize = b.option(
+        std.builtin.OptimizeMode,
+        "test-optimize",
+        "Optimize mode for test artifacts (default ReleaseSafe)",
+    ) orelse .ReleaseSafe;
     const zigeffect_std_dependency = b.dependency("zigeffect_std", .{});
     const zigeffect_std = zigeffect_std_dependency.module("zigeffect_std");
     const testing_runner = zigeffect_std_dependency.module("zigeffect_test_runner").root_source_file.?;
@@ -55,7 +64,7 @@ pub fn build(b: *std.Build) void {
     const integration_module = b.createModule(.{
         .root_source_file = b.path("test/generated_projects_test.zig"),
         .target = target,
-        .optimize = optimize,
+        .optimize = test_optimize,
     });
     integration_module.addImport("zigeffect_cli", cli);
     const integration_tests = addV2Test(b, testing_runner, .{

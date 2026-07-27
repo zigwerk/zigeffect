@@ -17,6 +17,15 @@ fn addV2Test(b: *std.Build, runner: std.Build.LazyPath, options: std.Build.TestO
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    // Tests default to ReleaseSafe; binaries keep -Doptimize. A bare
+    // `zig build test` in Debug spends most of its time in the harness, which
+    // captures ten stack frames per allocation in every optimize mode.
+    // -Dtest-optimize=Debug restores those traces.
+    const test_optimize = b.option(
+        std.builtin.OptimizeMode,
+        "test-optimize",
+        "Optimize mode for test artifacts (default ReleaseSafe)",
+    ) orelse .ReleaseSafe;
 
     const zigeffect_dependency = b.dependency("zigeffect", .{ .target = target, .optimize = optimize });
     const zigeffect = zigeffect_dependency.module("zigeffect");
@@ -45,7 +54,7 @@ pub fn build(b: *std.Build) void {
     const canonical_test_module = b.createModule(.{
         .root_source_file = b.path("test/canonical_architecture_test.zig"),
         .target = target,
-        .optimize = optimize,
+        .optimize = test_optimize,
     });
     canonical_test_module.addImport("zigeffect_std", zigeffect_std);
     const canonical_tests = addV2Test(b, testing_runner, .{
@@ -60,7 +69,7 @@ pub fn build(b: *std.Build) void {
     const durable_runtime_test_module = b.createModule(.{
         .root_source_file = b.path("test/durable_runtime_test.zig"),
         .target = target,
-        .optimize = optimize,
+        .optimize = test_optimize,
     });
     durable_runtime_test_module.addImport("zigeffect_std", zigeffect_std);
     const durable_runtime_tests = addV2Test(b, testing_runner, .{
@@ -75,7 +84,7 @@ pub fn build(b: *std.Build) void {
     const development_runtime_test_module = b.createModule(.{
         .root_source_file = b.path("test/development_runtime_test.zig"),
         .target = target,
-        .optimize = optimize,
+        .optimize = test_optimize,
     });
     development_runtime_test_module.addImport("zigeffect_std", zigeffect_std);
     const development_runtime_tests = addV2Test(b, testing_runner, .{
@@ -90,7 +99,7 @@ pub fn build(b: *std.Build) void {
     const effect_reference_foundations_test_module = b.createModule(.{
         .root_source_file = b.path("test/effect_reference_foundations_test.zig"),
         .target = target,
-        .optimize = optimize,
+        .optimize = test_optimize,
     });
     effect_reference_foundations_test_module.addImport("zigeffect_std", zigeffect_std);
     const effect_reference_foundations_tests = addV2Test(b, testing_runner, .{
