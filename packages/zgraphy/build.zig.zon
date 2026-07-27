@@ -4,6 +4,9 @@
     .minimum_zig_version = "0.16.0",
     .fingerprint = 0x10010c5759b06257,
     .dependencies = .{
+        .zgdb = .{
+            .path = "../zgdb",
+        },
         .zigeffect = .{
             .path = "../zigeffect",
         },

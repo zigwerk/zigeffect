@@ -1,6 +1,6 @@
 pub const Model = @import("model.zig");
 pub const Memory = @import("memory.zig");
-pub const Nendb = @import("nendb.zig");
+pub const Nendb = @import("zgdb").Store;
 pub const Store = @import("store.zig");
 pub const Indexer = @import("indexer.zig");
 pub const Search = @import("search.zig");

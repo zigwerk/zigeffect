@@ -1,6 +1,6 @@
 const std = @import("std");
 const model = @import("model.zig");
-const nendb = @import("nendb.zig");
+const nendb = @import("zgdb").Store;
 const owned = @import("memory.zig");
 
 /// Below this IDF a term appears in at least half the corpus. With the smoothed

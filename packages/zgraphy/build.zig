@@ -7,6 +7,8 @@ pub fn build(b: *std.Build) void {
     const zstd = zstd_dep.module("zigeffect_std");
     const parser_dep = b.dependency("zigeffect_parser", .{ .target = target, .optimize = optimize });
     const parser = parser_dep.module("zigeffect_parser");
+    const zgdb_dep = b.dependency("zgdb", .{ .target = target, .optimize = optimize });
+    const zgdb = zgdb_dep.module("zgdb");
     const benchmark_assets = b.createModule(.{
         .root_source_file = b.path("benchmarks/embedded.zig"),
         .target = target,
@@ -19,6 +21,7 @@ pub fn build(b: *std.Build) void {
     });
     zgraphy.addImport("zigeffect_std", zstd);
     zgraphy.addImport("zigeffect_parser", parser);
+    zgraphy.addImport("zgdb", zgdb);
     zgraphy.addImport("zgraphy_benchmark_assets", benchmark_assets);
 
     const cli_module = b.createModule(.{

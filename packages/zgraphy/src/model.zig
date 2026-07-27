@@ -1,5 +1,5 @@
 const std = @import("std");
-const nendb = @import("nendb.zig");
+const nendb = @import("zgdb").Store;
 const owned = @import("memory.zig");
 
 pub const NodeKind = enum(u8) {

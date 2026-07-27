@@ -1,0 +1,10 @@
+.{
+    .name = .zgdb,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.16.0",
+    .fingerprint = 0xca73ec96e4c483ed,
+    .dependencies = .{
+        .zigeffect = .{ .path = "../zigeffect" },
+    },
+    .paths = .{ "build.zig", "build.zig.zon", "src", "test" },
+}

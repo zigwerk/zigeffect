@@ -1,15 +1,14 @@
-const std = @import("std");
+//! Forwards to zgdb's ownership boundary.
+//!
+//! These two functions moved into the database package with the storage engine
+//! that uses them. Twenty-seven files in zgraphy import this path, and none of
+//! them care where the helpers live — so the file stays and forwards rather
+//! than churning every import to prove a point about layering.
+//!
+//! Explicit re-exports rather than a wildcard: if zgdb grows a helper that
+//! zgraphy should not reach for, that has to be a decision here.
 
-/// Central audited ownership boundary for allocator-backed zgraphy columns and
-/// result values. Callers retain the allocator and release every returned
-/// slice in their matching `deinit` or error rollback path.
-pub fn slice(comptime T: type, allocator: std.mem.Allocator, count: usize) std.mem.Allocator.Error![]T {
-    return allocator.alloc(T, count);
-}
+const zgdb = @import("zgdb");
 
-/// Central audited ownership boundary for durable copies of caller-owned
-/// source metadata. The returned slice follows the same explicit ownership
-/// contract as `slice`.
-pub fn copy(comptime T: type, allocator: std.mem.Allocator, input: []const T) std.mem.Allocator.Error![]T {
-    return allocator.dupe(T, input);
-}
+pub const slice = zgdb.Memory.slice;
+pub const copy = zgdb.Memory.copy;

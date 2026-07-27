@@ -4,7 +4,7 @@ const discovery = @import("discovery.zig");
 const freshness = @import("freshness.zig");
 const memory = @import("memory.zig");
 const model = @import("model.zig");
-const nendb = @import("nendb.zig");
+const nendb = @import("zgdb").Store;
 const semantic_recipes = @import("semantic_recipes.zig");
 
 pub const schema = "zgraphy.origin-ledger.v1";
