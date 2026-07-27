@@ -99,6 +99,20 @@ pub const Backend = struct {
     }
 };
 
+/// A ranking match needs the capability that matches its kind.
+///
+/// Until this existed, `text_search` and `vector_search` were declared on
+/// backends and reachable by no plan node — neither offered nor deniable, which
+/// is a capability in name only.
+fn rankingGap(backend_name: []const u8, capabilities: Capabilities, predicates: []const Plan.Predicate) ?Unsupported {
+    for (predicates) |predicate| switch (predicate.match) {
+        .lexical => if (!capabilities.text_search) return .{ .backend = backend_name, .feature = "text_search" },
+        .similar => if (!capabilities.vector_search) return .{ .backend = backend_name, .feature = "vector_search" },
+        .text, .id => {},
+    };
+    return null;
+}
+
 fn supportGap(backend_name: []const u8, capabilities: Capabilities, plan: Plan.Plan) ?Unsupported {
     const needs_predicates = switch (plan.from) {
         .matching => true,
@@ -107,6 +121,14 @@ fn supportGap(backend_name: []const u8, capabilities: Capabilities, plan: Plan.P
     if (needs_predicates and !capabilities.predicates) {
         return .{ .backend = backend_name, .feature = "predicates" };
     }
+    // A ranking match needs the capability that matches its kind. Until now
+    // `text_search` and `vector_search` were declared on backends and reachable
+    // by no plan node, so nothing could request them and nothing could refuse
+    // them — a capability that is neither offered nor denied.
+    if (rankingGap(backend_name, capabilities, switch (plan.from) {
+        .matching => |predicates| predicates,
+        .event => &.{},
+    })) |gap| return gap;
     for (plan.steps) |step| {
         if (!capabilities.traversal) return .{ .backend = backend_name, .feature = "traversal" };
         if (step.max_depth > 1 and !capabilities.recursive_traversal) {
@@ -118,8 +140,32 @@ fn supportGap(backend_name: []const u8, capabilities: Capabilities, plan: Plan.P
         if (step.where.len != 0 and !capabilities.predicates) {
             return .{ .backend = backend_name, .feature = "predicates" };
         }
+        if (rankingGap(backend_name, capabilities, step.where)) |gap| return gap;
     }
     return null;
+}
+
+test "a backend that cannot rank refuses to be asked" {
+    // The defect this closes: text_search and vector_search were declared on
+    // every backend and requestable by no plan, so a store that could not rank
+    // never had to say so — and one that could was never asked.
+    const probe = [_]f32{ 0.5, 0.5 };
+    const lexical = try Plan.Builder.matching(&.{.{ .field = "bio", .match = .{ .lexical = "checkout" } }}).build();
+    const similar = try Plan.Builder.matching(&.{.{ .field = "profile", .match = .{ .similar = &probe } }}).build();
+
+    const cannot = Capabilities{ .predicates = true };
+    try std.testing.expectEqualStrings("text_search", supportGap("store", cannot, lexical).?.feature);
+    try std.testing.expectEqualStrings("vector_search", supportGap("store", cannot, similar).?.feature);
+
+    const can = Capabilities{ .predicates = true, .text_search = true, .vector_search = true };
+    try std.testing.expect(supportGap("store", can, lexical) == null);
+    try std.testing.expect(supportGap("store", can, similar) == null);
+
+    // Refused by name and before execution, so a store never partially answers
+    // a question it cannot answer.
+    const half = Capabilities{ .predicates = true, .text_search = true };
+    try std.testing.expectEqualStrings("vector_search", supportGap("store", half, similar).?.feature);
+    try std.testing.expect(supportGap("store", half, lexical) == null);
 }
 
 const TestBackend = struct {

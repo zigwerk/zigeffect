@@ -160,7 +160,13 @@ fn matchesAll(node: zstd.CausalGraph.Snapshot.NodeView, predicates: []const Plan
 }
 
 fn matches(node: zstd.CausalGraph.Snapshot.NodeView, predicate: Plan.Predicate) bool {
+    // Ranking matches are refused by `supportGap` before a plan reaches here,
+    // because this backend declares neither capability. Reaching this branch
+    // means that check was bypassed, and a wrong answer would be worse than a
+    // loud stop.
+    if (predicate.match.ranks()) unreachable;
     const matched = switch (predicate.match) {
+        .lexical, .similar => unreachable,
         .text => |wanted| blk: {
             const actual = textColumn(node, predicate.field) orelse break :blk false;
             break :blk std.mem.eql(u8, actual, wanted);

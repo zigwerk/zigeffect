@@ -34,8 +34,13 @@ pub const capabilities = Backend.Capabilities{
     .reverse_traversal = true,
     // A relational store indexes documents and embeddings, so unlike the causal
     // log these are real here.
-    .text_search = true,
-    .vector_search = true,
+    // False until the emitter can write them. Postgres can rank with ts_rank_cd
+    // and order by vector distance; this compiler cannot yet, and a capability
+    // is a claim about what the code does rather than about what the store
+    // could. Declaring it true made two flags no plan could request and no
+    // emitter could honour — the exact shape this repository keeps finding.
+    .text_search = false,
+    .vector_search = false,
     .time_travel = true,
     .transactions = true,
 };
@@ -288,6 +293,10 @@ fn appendPredicateInto(
     try parameters.append(allocator, switch (predicate.match) {
         .text => |value| .{ .text = value },
         .id => |value| .{ .id = value },
+        // Same reason as the embedded backend: refused by capability before
+        // execution. This emitter cannot write ts_rank_cd or a distance
+        // operator yet, and the flags below say so.
+        .lexical, .similar => unreachable,
     });
 }
 
@@ -452,8 +461,13 @@ test "chained steps with a bounded hop are still refused rather than unbounded" 
 }
 
 test "the connector declares what a relational store really can do" {
-    try std.testing.expect(capabilities.vector_search);
-    try std.testing.expect(capabilities.text_search);
+    // Both false, and asserted false so the claim cannot drift back without a
+    // deliberate edit. Postgres can rank and can order by distance; this
+    // compiler cannot emit either yet. A capability describes the code, not the
+    // store it talks to — the previous assertion pinned the store's ability and
+    // read as the connector's.
+    try std.testing.expect(!capabilities.vector_search);
+    try std.testing.expect(!capabilities.text_search);
     try std.testing.expect(capabilities.transactions);
     try std.testing.expect(capabilities.time_travel);
 }

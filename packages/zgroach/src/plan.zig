@@ -35,8 +35,30 @@ pub const Error = error{
 pub const FieldName = []const u8;
 
 pub const Match = union(enum) {
+    /// Equality on a text column.
     text: []const u8,
+    /// Equality on an identifier or integer column.
     id: u64,
+    /// Ranked by lexical relevance over a `.document` column. Requires the
+    /// backend's `text_search` capability.
+    ///
+    /// A separate variant from `.text` on purpose: equality answers "is it this"
+    /// and ranking answers "how much is it like this", and a store that can do
+    /// the first cannot necessarily do the second. Collapsing them is how a
+    /// capability flag ends up declared and unreachable.
+    lexical: []const u8,
+    /// Ordered by distance from a probe over a `.vector` column. Requires the
+    /// backend's `vector_search` capability.
+    similar: []const f32,
+
+    /// Whether this match ranks rather than compares. Ranking needs a capability
+    /// and produces an order; comparison needs neither.
+    pub fn ranks(self: Match) bool {
+        return switch (self) {
+            .text, .id => false,
+            .lexical, .similar => true,
+        };
+    }
 };
 
 pub const Predicate = struct {
@@ -153,7 +175,11 @@ fn checkField(node: Schema.Node, predicate: Predicate) !void {
     const accepts: bool = switch (field.kind) {
         .text => predicate.match == .text,
         .integer, .id => predicate.match == .id,
-        .document, .vector => false,
+        // Ranked columns answer a ranking operator and nothing else. Equality on
+        // an embedding is not a cheap approximation of similarity, it is a
+        // different question with no useful answer.
+        .document => predicate.match == .lexical,
+        .vector => predicate.match == .similar,
     };
     if (!accepts) return error.FieldKindMismatch;
 }
@@ -238,6 +264,38 @@ test "a plan refuses shapes the executor could not honour" {
         error.InvalidPlan,
         Builder.fromEvent(1).traverse(&.{.{ .direction = .children, .max_depth = 0 }}).build(),
     );
+}
+
+test "a ranking match is a different question from an equality one" {
+    const commerce = Schema.Schema{
+        .name = "commerce",
+        .nodes = &.{.{ .name = "User", .table = "user", .fields = &.{
+            .{ .name = "id", .column = "id", .kind = .id },
+            .{ .name = "bio", .column = "bio_search", .kind = .document },
+            .{ .name = "profile", .column = "embedding", .kind = .vector },
+        } }},
+        .relations = &.{},
+    };
+
+    // A document ranks lexically and a vector ranks by distance. Each accepts
+    // exactly one operator, and the schema is what says which.
+    const lexical = try Builder.matching(&.{.{ .field = "bio", .match = .{ .lexical = "checkout" } }}).build();
+    try lexical.validateAgainst(commerce, "User");
+
+    const probe = [_]f32{ 0.1, 0.2, 0.3 };
+    const similar = try Builder.matching(&.{.{ .field = "profile", .match = .{ .similar = &probe } }}).build();
+    try similar.validateAgainst(commerce, "User");
+
+    // Crossed over, they are refused: ranking a vector lexically is not a
+    // degraded answer, it is a different question with no answer.
+    const crossed = try Builder.matching(&.{.{ .field = "profile", .match = .{ .lexical = "checkout" } }}).build();
+    try std.testing.expectError(error.FieldKindMismatch, crossed.validateAgainst(commerce, "User"));
+
+    // And ranking is distinguishable from comparison without inspecting the tag.
+    try std.testing.expect((Match{ .lexical = "x" }).ranks());
+    try std.testing.expect((Match{ .similar = &probe }).ranks());
+    try std.testing.expect(!(Match{ .text = "x" }).ranks());
+    try std.testing.expect(!(Match{ .id = 1 }).ranks());
 }
 
 test "equality is refused on columns that are ranked, not compared" {
