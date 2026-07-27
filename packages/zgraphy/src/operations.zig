@@ -2105,7 +2105,7 @@ fn validateCandidate(
     if (!std.mem.eql(u8, &replayed_identity, pointer.graph_fingerprint) or
         !std.mem.eql(u8, &replayed_index_hex, pointer.secondary_index_fingerprint)) return error.CandidateDeltaReplayMismatch;
 
-    try validateGenerationMetadata(allocator, io, root, config, pointer, &loaded, expected_pruned, .{});
+    try validateGenerationMetadata(allocator, io, root, config, pointer, &loaded, expected_pruned, .{}, null);
     try validatePublishedHeaders(allocator, io, root, config, pointer);
     try validateExtractionManifest(allocator, io, root, pointer);
     try validateRepositoryContextAndLineage(allocator, io, root, pointer, &loaded);
@@ -2204,7 +2204,7 @@ fn validateLoadedGeneration(
         !std.meta.eql(pointer.secondary_indexes, loaded.graph.secondaryIndexStats())) return error.ActiveGenerationSecondaryIndexMismatch;
     try validateGenerationMetadata(allocator, io, root, config, pointer, &loaded.graph, null, .{
         .database = loaded.recovery_source == .full_snapshot,
-    });
+    }, active_index);
     try validatePublishedHeaders(allocator, io, root, config, pointer);
     try validateExtractionManifest(allocator, io, root, pointer);
     try validateRepositoryContextAndLineage(allocator, io, root, pointer, &loaded.graph);
@@ -2242,7 +2242,7 @@ fn activeCheckpointComplete(
     var journal = try delta_journal.inspect(allocator, io, root, pointer.delta_journal);
     defer journal.deinit();
     try validateDeltaBindings(pointer, journal);
-    try validateGenerationMetadata(allocator, io, root, config, pointer, &graph, null, .{});
+    try validateGenerationMetadata(allocator, io, root, config, pointer, &graph, null, .{}, null);
     try validatePublishedHeaders(allocator, io, root, config, pointer);
     try validateExtractionManifest(allocator, io, root, pointer);
     try validateRepositoryContextAndLineage(allocator, io, root, pointer, &graph);
@@ -2271,6 +2271,15 @@ fn validateGenerationMetadata(
     graph: *const model.RepositoryGraph,
     expected_pruned: ?PrunedRecords,
     seals: ArtifactSealValidation,
+    /// The secondary-index fingerprint, when the caller already computed it over
+    /// this exact graph.
+    ///
+    /// `secondaryIndexFingerprint` validates the indexes before computing, so
+    /// asking for it here re-runs `validateSecondaryIndexes` (34 ms) and the
+    /// digest (20 ms) that the caller produced moments earlier on the same graph
+    /// object. Null keeps the original behaviour, so a caller that has not
+    /// computed it is unaffected.
+    known_index_fingerprint: ?[32]u8,
 ) !void {
     const metadata_bytes = try root.readFileAlloc(io, pointer.metadata, allocator, .limited(max_generation_metadata_bytes));
     defer allocator.free(metadata_bytes);
@@ -2291,7 +2300,7 @@ fn validateGenerationMetadata(
         pointer.origin_input_fingerprint,
         pointer.repair_plan_fingerprint,
     );
-    const index_fingerprint = try graph.secondaryIndexFingerprint(allocator);
+    const index_fingerprint = known_index_fingerprint orelse try graph.secondaryIndexFingerprint(allocator);
     const index_fingerprint_hex = std.fmt.bytesToHex(index_fingerprint, .lower);
     const index_stats = graph.secondaryIndexStats();
     if (!value.complete or !std.mem.eql(u8, value.schema, generation_schema) or value.schema_version != generation_schema_version or
