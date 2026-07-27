@@ -7,6 +7,11 @@ pub const executable_build =
     \\    const zigeffect_std_dependency = b.dependency("zigeffect_std", .{ .target = target, .optimize = optimize });
     \\    const zigeffect_std = zigeffect_std_dependency.module("zigeffect_std");
     \\    const testing_runner = zigeffect_std_dependency.module("zigeffect_test_runner").root_source_file.?;
+    \\    // The repository graph is available to tests, not to the application.
+    \\    // A generated app should not link a code-intelligence database into its
+    \\    // executable; what it wants out of the box is the ability to assert
+    \\    // against its own structure.
+    \\    const zgraphy = b.dependency("zgraphy", .{ .target = target, .optimize = optimize }).module("zgraphy");
     \\__ADAPTER_DEPENDENCIES__
     \\__SHARED_DEPENDENCY__
     \\    const app = b.addModule("app", .{
@@ -38,6 +43,7 @@ pub const executable_build =
     \\    });
     \\    test_module.addImport("app", app);
     \\    test_module.addImport("zigeffect_std", zigeffect_std);
+    \\    test_module.addImport("zgraphy", zgraphy);
     \\    var test_options = std.Build.TestOptions{ .name = "__PROJECT_NAME__-tests", .root_module = test_module, .test_runner = .{ .path = testing_runner, .mode = .server } };
     \\    if (b.option([]const u8, "test-filter", "Compile only matching native tests")) |filter| test_options.filters = &.{filter};
     \\    const tests = b.addTest(test_options);
@@ -55,6 +61,7 @@ pub const executable_zon =
     \\    .fingerprint = 0x__FINGERPRINT__,
     \\    .dependencies = .{
     \\        .zigeffect_std = .{ .path = "__STD_PATH__" },
+    \\__GRAPH_ZON_DEPENDENCY__
     \\__ADAPTER_ZON_DEPENDENCIES__
     \\__SHARED_ZON_DEPENDENCY__
     \\    },
@@ -503,6 +510,7 @@ pub const executable_test =
     \\const std = @import("std");
     \\const app = @import("app");
     \\const zstd = @import("zigeffect_std");
+    \\const zgraphy = @import("zgraphy");
     \\
     \\fn runWithAllocator(allocator: std.mem.Allocator) !void {
     \\    const Input = struct { port: i64, development: bool };
@@ -537,6 +545,34 @@ pub const executable_test =
     \\    try context.recordReport(.performance, budgets);
     \\    try context.mapCausalEventIds(&runtime);
     \\    try runtime.shutdown();
+    \\    try context.publish(std.testing.io, std.Io.Dir.cwd(), 1);
+    \\}
+    \\
+    \\fn graphScenario() zstd.Testing.Scenario {
+    \\    return .{ .id = "repository-graph", .label = "the project can index and query its own source", .requirement = "req-bootstrap", .acceptance_check = "check-bootstrap", .component = "__PROJECT_NAME__", .command = "test", .source_roots = &.{ "src", "test" } };
+    \\}
+    \\
+    \\test "the project can index its own source and get an answer back" {
+    \\    var context = try zstd.Testing.TestContext.initFromProject(std.testing.allocator, std.testing.io, std.Io.Dir.cwd(), .{ .project = "__PROJECT_NAME__", .suite = "acceptance", .scenario = graphScenario(), .seed = 43 });
+    \\    defer context.deinit();
+    \\    const assertions = zstd.Testing.AssertionRecorder.init(&context);
+    \\
+    \\    // Indexed from this project's own `src/`, so the scenario fails if the
+    \\    // graph stops seeing the code rather than only if the library breaks.
+    \\    var source = try std.Io.Dir.cwd().openDir(std.testing.io, "src", .{ .iterate = true, .follow_symlinks = false });
+    \\    defer source.close(std.testing.io);
+    \\    var built = try zgraphy.Indexer.buildRepository(std.testing.allocator, std.testing.io, source, .{});
+    \\    defer built.deinit();
+    \\
+    \\    var results = try zgraphy.Search.queryAlloc(std.testing.allocator, &built.graph, "greeting service", .{ .limit = 5 });
+    \\    defer results.deinit();
+    \\
+    \\    try assertions.boolean(.{
+    \\        .id = "graph-indexes-this-project",
+    \\        .label = "the repository graph contains this project's own symbols",
+    \\        .repair_hint = "keep src/ indexable — a scaffold that cannot see itself cannot answer about itself",
+    \\    }, built.graph.nodeCount() > 0 and results.items.len > 0);
+    \\    try assertions.noFindings(.{ .id = "graph-causal-clean", .label = "indexing records no causal findings" });
     \\    try context.publish(std.testing.io, std.Io.Dir.cwd(), 1);
     \\}
     \\

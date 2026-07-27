@@ -2684,6 +2684,13 @@ fn addExecutableProject(
     defer allocator.free(otel_path);
     const adapter_zon = if (real_profile) try std.fmt.allocPrint(allocator, "        .zigeffect_http = .{{ .path = \"{s}\" }},\n        .zigeffect_postgres_libpq = .{{ .path = \"{s}\" }},\n        .zigeffect_otel = .{{ .path = \"{s}\" }},", .{ http_path, postgres_path, otel_path }) else try allocator.dupe(u8, "");
     defer allocator.free(adapter_zon);
+    // Resolved the same way the adapters are: a sibling of zigeffect-std. There
+    // is no separate option because there is no case where a project wants the
+    // standard library from one checkout and the graph from another.
+    const zgraphy_path = try siblingAdapterPathAlloc(allocator, std_path, "zgraphy");
+    defer allocator.free(zgraphy_path);
+    const graph_zon = try std.fmt.allocPrint(allocator, "        .zgraphy = .{{ .path = \"{s}\" }},", .{zgraphy_path});
+    defer allocator.free(graph_zon);
 
     try addRenderedAt(plan, prefix, "build.zig", templates.executable_build, &.{
         .{ "__PROJECT_NAME__", component_name },
@@ -2696,6 +2703,7 @@ fn addExecutableProject(
         .{ "__ZIG_NAME__", package_name },
         .{ "__FINGERPRINT__", fingerprint },
         .{ "__STD_PATH__", std_path },
+        .{ "__GRAPH_ZON_DEPENDENCY__", graph_zon },
         .{ "__ADAPTER_ZON_DEPENDENCIES__", adapter_zon },
         .{ "__SHARED_ZON_DEPENDENCY__", if (with_shared) "        .shared = .{ .path = \"../../packages/shared\" }," else "" },
     });
@@ -2800,6 +2808,10 @@ fn addLibraryProject(
         .{ "__ZIG_NAME__", package_name },
         .{ "__FINGERPRINT__", fingerprint },
         .{ "__STD_PATH__", std_path },
+        // A library gets no graph dependency: `library_build` has no wiring for
+        // one, and an unused entry in the manifest is a fetch every consumer
+        // pays for nothing.
+        .{ "__GRAPH_ZON_DEPENDENCY__", "" },
         .{ "__ADAPTER_ZON_DEPENDENCIES__", "" },
         .{ "__SHARED_ZON_DEPENDENCY__", "" },
     });
