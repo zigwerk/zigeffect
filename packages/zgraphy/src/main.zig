@@ -1032,6 +1032,8 @@ fn runQualityMatrix(
 fn runQuery(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, command_line: zstd.Cli.ParsedCommand) !void {
     const query = command_line.positional(0) orelse return error.MissingQuery;
     const limit = try numericOptionOf(command_line, "limit", 10, 1, 1024);
+    const budget_tokens = try numericOptionOf(command_line, "budget", 2000, 64, 200_000);
+    const budget_chars = budget_tokens * 3;
     var loaded = try openGraph(allocator, io, root);
     defer loaded.deinit();
     var results = try zgraphy.Search.queryAlloc(allocator, &loaded.graph, query, .{ .limit = limit });
@@ -1054,8 +1056,24 @@ fn runQuery(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, command_
             .results = views,
         });
     }
+    // Rows are bounded by a token budget, not only by --limit. `limit` bounds a
+    // count, and a count says nothing about what it costs the reader: ten rows
+    // of one symbol each and ten rows carrying source are wildly different
+    // answers. Tokens are the scarce resource, so tokens are the unit.
+    //
+    // Three characters per token is graphify's approximation and is close enough
+    // for text this shape. Applied now, while a row is one line, because the
+    // render grows source and edges in C9 and a bound added afterwards is a
+    // bound nobody trusts.
+    var spent_chars: usize = 0;
+    var cut: usize = 0;
     for (results.items) |result| {
         const node = loaded.graph.findNode(result.node_id).?;
+        if (spent_chars >= budget_chars) {
+            cut += 1;
+            continue;
+        }
+        spent_chars += node.label.len + node.path.len + 64;
         var label_buffer: zgraphy.Sanitize.Buffer = undefined;
         var path_buffer: zgraphy.Sanitize.Buffer = undefined;
         try writeText(io, allocator, "{s} [{s}] {s}:{d} score={d:.3} keyword={d:.3} vector={d:.3} graph={d:.3}\n", .{
@@ -1072,6 +1090,15 @@ fn runQuery(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, command_
     // Say it last, where a reader who skimmed the rows still sees it. A ranking
     // is normalised, so the best of a bad set still scores 1.000 — the number
     // cannot carry this and silence reads as endorsement.
+    // Name the next move. A truncation notice that only says "truncated" spends
+    // the reader's attention to tell them they have a problem without telling
+    // them what to do about it.
+    if (cut > 0) {
+        try writeText(io, allocator, "{d} more result(s) cut by a ~{d}-token budget — narrow with --kind, or raise --budget\n", .{
+            cut,
+            budget_tokens,
+        });
+    }
     if (results.confidence == .low) {
         try writeText(io, allocator, "low confidence: {s} (scanned {d} of {d} nodes)\n", .{
             results.confidence_reason,
