@@ -1,4 +1,5 @@
 const std = @import("std");
+const failure_sink = @import("failure_sink.zig");
 const fx = @import("zigeffect");
 const Contract = @import("contract.zig");
 const Project = @import("../project/root.zig");
@@ -154,6 +155,12 @@ pub const TestContext = struct {
     }
 
     pub fn deinit(self: *TestContext) void {
+        // First, while the causal store and the assertions are both still
+        // alive. `defer ctx.deinit()` is the last program point where what the
+        // run did and the fact that something went wrong coexist — a failed
+        // assertion returns `error.AssertionFailed` and unwinds straight into
+        // this same defer, so a failed assertion and a raw error take one path.
+        self.stageFailureBrief();
         for (self.assertions.items) |assertion| deinitAssertion(self.allocator, assertion);
         self.assertions.deinit(self.allocator);
         for (self.artifacts.items) |artifact| deinitArtifact(self.allocator, artifact);
@@ -170,6 +177,58 @@ pub const TestContext = struct {
         self.causal_store.deinit();
         self.env.deinit();
         if (self.control) |*control| control.deinit();
+    }
+
+    /// Describe what the runtime found wrong, for the runner to print if this
+    /// test failed.
+    ///
+    /// Only findings: invariants the runtime violated without raising an error —
+    /// a resource acquired and never finalized, a fiber suspended and never
+    /// resumed, a service required with no provider. Those leave no stack frame,
+    /// so a trace cannot show them and the compiler never saw them. That is the
+    /// whole of what the causal graph knows and a stack trace does not.
+    ///
+    /// Deliberately not the ancestor walk. A real one measures five nodes of
+    /// which four are `run_started` / `effect_started` scaffolding, and it
+    /// restates `@errorName` at four times the cost. Adding it would make this
+    /// something an agent learns to skip.
+    fn stageFailureBrief(self: *TestContext) void {
+        if (comptime !failure_sink.enabled) return;
+
+        var findings = self.causal_store.findings(self.allocator) catch return;
+        defer findings.deinit();
+        if (findings.items.len == 0) return;
+
+        var buffer: [2048]u8 = undefined;
+        var written: usize = 0;
+        written += (std.fmt.bufPrint(buffer[written..], "zigeffect causal brief   {s} / {s}\n", .{
+            self.options.scenario.requirement,
+            self.options.scenario.id,
+        }) catch return).len;
+
+        const shown = @min(findings.items.len, 4);
+        for (findings.items[0..shown]) |finding| {
+            written += (std.fmt.bufPrint(buffer[written..], "  finding  {s}  e#{d}", .{
+                @tagName(finding.kind),
+                finding.event_id,
+            }) catch break).len;
+            if (finding.label.len != 0) {
+                written += (std.fmt.bufPrint(buffer[written..], "  {s}", .{finding.label}) catch break).len;
+            }
+            if (finding.scope_id) |scope| {
+                written += (std.fmt.bufPrint(buffer[written..], "  scope={d}", .{scope}) catch break).len;
+            }
+            if (finding.fiber_id) |fiber| {
+                written += (std.fmt.bufPrint(buffer[written..], "  fiber={d}", .{fiber}) catch break).len;
+            }
+            written += (std.fmt.bufPrint(buffer[written..], "\n", .{}) catch break).len;
+        }
+        if (findings.items.len > shown) {
+            if (std.fmt.bufPrint(buffer[written..], "  ... {d} more\n", .{findings.items.len - shown})) |text| {
+                written += text.len;
+            } else |_| {}
+        }
+        failure_sink.stage(buffer[0..written]);
     }
 
     pub fn service(self: *TestContext, comptime Service: type) *Service {

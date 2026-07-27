@@ -117,6 +117,50 @@ fn publishThenPanic(msg: []const u8, first_trace_addr: ?usize) noreturn {
     std.debug.defaultPanic(msg, first_trace_addr);
 }
 
+/// A failing test's causal brief, staged by whoever is dying and printed by
+/// whoever knows it failed.
+///
+/// Those are different components on purpose. Only the runner knows a test
+/// failed — `TestContext` cannot, because a passing test may deliberately record
+/// a failure to exercise the assertion machinery, and `assertions.zig` has one
+/// that does. So the context stages unconditionally and cheaply, and the runner
+/// discards the staging on every test that passes.
+///
+/// `zigeffect-std` reaches this through `@import("root")`, which resolves to
+/// this file in a test binary — the same mechanism that makes `std_options`
+/// above take effect. Linked into an application instead, the declaration is
+/// absent, the caller's check is comptime-false, and every call compiles to
+/// nothing.
+pub const zigeffect_failure_brief_abi: u32 = 1;
+
+var failure_brief: [4096]u8 = undefined;
+var failure_brief_len: usize = 0;
+
+/// Replace the staged brief. Last writer wins: the innermost context to tear
+/// down is the one closest to the failure.
+pub fn zigeffectStageFailureBrief(text: []const u8) void {
+    const bounded = @min(text.len, failure_brief.len);
+    @memcpy(failure_brief[0..bounded], text[0..bounded]);
+    failure_brief_len = bounded;
+}
+
+/// Print whatever the dying test staged, and clear it either way.
+///
+/// Clearing on every test — not only failing ones — is what keeps a brief from
+/// one test appearing under another's failure. The staging is unconditional
+/// because the context cannot know; the discarding is where that gets resolved.
+fn printFailureBrief() void {
+    const staged = takeFailureBrief();
+    if (staged.len == 0) return;
+    std.debug.print("{s}", .{staged});
+}
+
+fn takeFailureBrief() []const u8 {
+    const staged = failure_brief[0..failure_brief_len];
+    failure_brief_len = 0;
+    return staged;
+}
+
 var log_err_count: usize = 0;
 var fba: std.heap.FixedBufferAllocator = .init(&fba_buffer);
 var fba_buffer: [8192]u8 = undefined;
@@ -264,6 +308,7 @@ fn mainServer(init: std.process.Init.Minimal) !void {
                 defer running_index = null;
                 const status: TestResults.Status = if (test_fn.func()) |v| s: {
                     v;
+                    _ = takeFailureBrief();
                     break :s .pass;
                 } else |err| switch (err) {
                     error.SkipZigTest => .skip,
@@ -272,6 +317,7 @@ fn mainServer(init: std.process.Init.Minimal) !void {
                         if (@errorReturnTrace()) |trace| {
                             std.debug.dumpErrorReturnTrace(trace);
                         }
+                        printFailureBrief();
                         break :s .fail;
                     },
                 };
@@ -464,6 +510,7 @@ fn mainTerminal(init: std.process.Init.Minimal) void {
                 if (@errorReturnTrace()) |trace| {
                     std.debug.dumpErrorReturnTrace(trace);
                 }
+                printFailureBrief();
                 test_node.end();
             },
         }
