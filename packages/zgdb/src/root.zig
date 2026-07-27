@@ -13,6 +13,7 @@
 
 pub const Memory = @import("memory.zig");
 pub const Store = @import("nendb.zig");
+pub const Service = @import("service.zig");
 
 test {
     // Zig collects tests only from the module under test, so a package whose
@@ -20,4 +21,5 @@ test {
     // tests. This has already happened once in this repository.
     _ = Memory;
     _ = Store;
+    _ = Service;
 }

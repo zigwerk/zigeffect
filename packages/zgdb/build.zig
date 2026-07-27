@@ -19,16 +19,21 @@ pub fn build(b: *std.Build) void {
         "Optimize mode (default ReleaseSafe; this package installs nothing)",
     ) orelse .ReleaseSafe;
 
-    // zigeffect is a test-only dependency: the storage engine itself imports
-    // nothing but std. Keeping it that way is the point of the package.
+    // The storage engine imports nothing but std. src/service.zig adds the
+    // ZigEffect service boundary on top, which is where a lifetime belongs.
     const zigeffect_dependency = b.dependency("zigeffect", .{ .target = target, .optimize = optimize });
     const testing_runner = zigeffect_dependency.module("zigeffect_test_runner").root_source_file.?;
 
+    const zigeffect = zigeffect_dependency.module("zigeffect");
     const zgdb = b.addModule("zgdb", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
     });
+    // zigeffect is now a real dependency, not only a test runner: the service
+    // boundary in src/service.zig is a scoped layer. The storage primitives
+    // still import nothing but std, which is the property worth keeping.
+    zgdb.addImport("zigeffect", zigeffect);
 
     const source_tests = addV2Test(b, testing_runner, .{
         .name = "zgdb-tests",
