@@ -34,12 +34,14 @@ pub const capabilities = Backend.Capabilities{
     .reverse_traversal = true,
     // A relational store indexes documents and embeddings, so unlike the causal
     // log these are real here.
-    // False until the emitter can write them. Postgres can rank with ts_rank_cd
-    // and order by vector distance; this compiler cannot yet, and a capability
-    // is a claim about what the code does rather than about what the store
-    // could. Declaring it true made two flags no plan could request and no
-    // emitter could honour — the exact shape this repository keeps finding.
-    .text_search = false,
+    // True because the emitter writes it: a `.lexical` predicate compiles to
+    // to_tsvector @@ plainto_tsquery. A capability is a claim about what this
+    // code does, not about what Postgres could do.
+    .text_search = true,
+    // Still false. A distance operator belongs in ORDER BY and the plan IR has
+    // no ordering clause, so there is no threshold for `.similar` to compare
+    // against and nothing honest to emit. It becomes true when the IR grows a
+    // rank clause, not before.
     .vector_search = false,
     .time_travel = true,
     .transactions = true,
@@ -269,35 +271,93 @@ fn appendPredicateInto(
     subsequent: []const u8,
 ) !void {
     const field = try schema.nodeField(node_name, predicate.field);
-    // The schema says what a column holds, so a text predicate on an id column
-    // is a compile error rather than a query that matches nothing.
-    const wants_text = predicate.match == .text;
-    if ((field.kind == .id or field.kind == .integer) == wants_text) return error.FieldKindMismatch;
+    // The same kind table `plan.checkField` uses, and for the same reason: the
+    // boolean this replaced ("does the column hold a number") had room for two
+    // answers and FieldKind has five, so `.document` and `.vector` fell through
+    // it in both places. Duplicating the rule was how it stayed wrong here after
+    // being fixed there — worth a shared helper the next time either moves.
+    const accepts: bool = switch (field.kind) {
+        .text => predicate.match == .text,
+        .integer, .id => predicate.match == .id,
+        .document => predicate.match == .lexical,
+        .vector => predicate.match == .similar,
+    };
+    if (!accepts) return error.FieldKindMismatch;
+
+    // A distance operator belongs in ORDER BY, and the plan IR has no ordering
+    // clause, so a `.similar` predicate has no threshold to compare against and
+    // nothing honest to emit. Refused here as well as by capability, so the
+    // reason is visible at the point it matters.
+    if (predicate.match == .similar) return error.VectorSearchNotCompiled;
 
     try sql.appendSlice(allocator, if (wrote_where.*) subsequent else first);
     wrote_where.* = true;
-    if (alias) |numbered| {
-        try sql.print(allocator, "n{d}.\"{s}\" {s} ${d}", .{
-            numbered,
-            field.column,
+
+    const qualified: []const u8 = if (alias) |numbered|
+        try std.fmt.allocPrint(allocator, "n{d}.\"{s}\"", .{ numbered, field.column })
+    else
+        try std.fmt.allocPrint(allocator, "n.\"{s}\"", .{field.column});
+    defer allocator.free(qualified);
+
+    switch (predicate.match) {
+        // Full-text match is a boolean question and Postgres answers it with @@.
+        // plainto_tsquery rather than to_tsquery: the input is a user's phrase,
+        // not tsquery syntax, and to_tsquery would make a stray '&' a syntax
+        // error inside the database.
+        .lexical => try sql.print(allocator, "{s}to_tsvector('english', {s}) @@ plainto_tsquery('english', ${d}){s}", .{
+            if (predicate.negated) "NOT (" else "",
+            qualified,
+            parameters.items.len + 1,
+            if (predicate.negated) ")" else "",
+        }),
+        .text, .id => try sql.print(allocator, "{s} {s} ${d}", .{
+            qualified,
             if (predicate.negated) "<>" else "=",
             parameters.items.len + 1,
-        });
-    } else {
-        try sql.print(allocator, "n.\"{s}\" {s} ${d}", .{
-            field.column,
-            if (predicate.negated) "<>" else "=",
-            parameters.items.len + 1,
-        });
+        }),
+        .similar => unreachable,
     }
     try parameters.append(allocator, switch (predicate.match) {
-        .text => |value| .{ .text = value },
+        .text, .lexical => |value| .{ .text = value },
         .id => |value| .{ .id = value },
-        // Same reason as the embedded backend: refused by capability before
-        // execution. This emitter cannot write ts_rank_cd or a distance
-        // operator yet, and the flags below say so.
-        .lexical, .similar => unreachable,
+        .similar => unreachable,
     });
+}
+
+test "a lexical match compiles to full-text SQL, and a vector one is refused" {
+    const commerce = Schema.Schema{
+        .name = "commerce",
+        .nodes = &.{.{ .name = "User", .table = "user", .fields = &.{
+            .{ .name = "id", .column = "id", .kind = .id },
+            .{ .name = "bio", .column = "bio_search", .kind = .document },
+            .{ .name = "profile", .column = "embedding", .kind = .vector },
+        } }},
+        .relations = &.{},
+    };
+
+    const lexical = try Plan.Builder.matching(&.{.{ .field = "bio", .match = .{ .lexical = "checkout failure" } }}).build();
+    var compiled = try compile(std.testing.allocator, commerce, "User", lexical);
+    defer compiled.deinit(std.testing.allocator);
+
+    // plainto_tsquery, not to_tsquery: the input is a phrase a person typed, and
+    // to_tsquery would turn a stray '&' into a syntax error inside the database.
+    try std.testing.expect(std.mem.indexOf(u8, compiled.sql, "to_tsvector('english', n0.\"bio_search\") @@ plainto_tsquery('english', $1)") != null);
+    // The phrase travels as a parameter, never spliced into the statement.
+    try std.testing.expectEqualStrings("checkout failure", compiled.parameters[0].text);
+    try std.testing.expect(std.mem.indexOf(u8, compiled.sql, "checkout failure") == null);
+
+    // Negation wraps rather than flipping the operator, because @@ has no <>.
+    const negated = try Plan.Builder.matching(&.{.{ .field = "bio", .match = .{ .lexical = "spam" }, .negated = true }}).build();
+    var compiled_negated = try compile(std.testing.allocator, commerce, "User", negated);
+    defer compiled_negated.deinit(std.testing.allocator);
+    try std.testing.expect(std.mem.indexOf(u8, compiled_negated.sql, "NOT (to_tsvector") != null);
+
+    // A distance operator belongs in ORDER BY and the IR has no ordering clause,
+    // so this is refused at compile time rather than emitted as something that
+    // looks like a filter and is not.
+    const probe = [_]f32{ 0.1, 0.2 };
+    const similar = try Plan.Builder.matching(&.{.{ .field = "profile", .match = .{ .similar = &probe } }}).build();
+    try std.testing.expectError(error.VectorSearchNotCompiled, compile(std.testing.allocator, commerce, "User", similar));
 }
 
 test "an anchored plan compiles to a parameterised statement" {
@@ -466,8 +526,10 @@ test "the connector declares what a relational store really can do" {
     // compiler cannot emit either yet. A capability describes the code, not the
     // store it talks to — the previous assertion pinned the store's ability and
     // read as the connector's.
+    // text_search is now backed by emission; vector_search is not, and both are
+    // asserted so neither can drift without a deliberate edit.
+    try std.testing.expect(capabilities.text_search);
     try std.testing.expect(!capabilities.vector_search);
-    try std.testing.expect(!capabilities.text_search);
     try std.testing.expect(capabilities.transactions);
     try std.testing.expect(capabilities.time_travel);
 }
