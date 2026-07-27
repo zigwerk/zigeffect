@@ -1032,10 +1032,12 @@ fn runQuery(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, command_
     }
     for (results.items) |result| {
         const node = loaded.graph.findNode(result.node_id).?;
+        var label_buffer: zgraphy.Sanitize.Buffer = undefined;
+        var path_buffer: zgraphy.Sanitize.Buffer = undefined;
         try writeText(io, allocator, "{s} [{s}] {s}:{d} score={d:.3} keyword={d:.3} vector={d:.3} graph={d:.3}\n", .{
-            node.label,
+            zgraphy.Sanitize.clean(&label_buffer, node.label),
             @tagName(node.kind),
-            node.path,
+            zgraphy.Sanitize.clean(&path_buffer, node.path),
             node.line,
             result.score,
             result.keyword_score,
@@ -1076,11 +1078,13 @@ fn runExplain(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, comman
         .features = features,
         .semantic_truncated = request_path_count > request_paths.len or feature_count > features.len,
     });
+    var label_buffer: zgraphy.Sanitize.Buffer = undefined;
+    var path_buffer: zgraphy.Sanitize.Buffer = undefined;
     return writeText(io, allocator, "{s} id={d} kind={s} source={s}:{d} incoming={d} outgoing={d} request_paths={d} features={d}\n", .{
-        node.label,
+        zgraphy.Sanitize.clean(&label_buffer, node.label),
         node.id,
         @tagName(node.kind),
-        node.path,
+        zgraphy.Sanitize.clean(&path_buffer, node.path),
         node.line,
         incoming,
         outgoing,
@@ -1161,7 +1165,8 @@ fn runPath(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, command_l
     for (path.node_ids, 0..) |id, index| {
         const node = loaded.graph.findNode(id).?;
         if (index > 0) try std.Io.File.stdout().writeStreamingAll(io, " -> ");
-        try std.Io.File.stdout().writeStreamingAll(io, node.label);
+        var label_buffer: zgraphy.Sanitize.Buffer = undefined;
+        try std.Io.File.stdout().writeStreamingAll(io, zgraphy.Sanitize.clean(&label_buffer, node.label));
     }
     try std.Io.File.stdout().writeStreamingAll(io, "\n");
 }
