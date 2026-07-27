@@ -1209,6 +1209,35 @@ test "zgraphy renders no byte from an indexed repository that could steer a term
     try std.testing.expect(std.mem.indexOfScalar(u8, encoded, '\n') == null);
 }
 
+test "zgraphy says when a ranking is not worth acting on" {
+    var graph = try zgraphy.RepositoryGraph.init(std.testing.allocator, .{});
+    defer graph.deinit();
+    _ = try graph.addSearchableNode(.symbol, "PaymentHandler", "src/payment.zig", 1, "process card payment authorization");
+    _ = try graph.addSearchableNode(.symbol, "OrderService", "src/order.zig", 1, "service handler for orders");
+    _ = try graph.addSearchableNode(.symbol, "KerberosTicket", "src/kerberos.zig", 1, "kerberos ticket exchange");
+
+    // A specific term that one node owns: worth acting on.
+    var strong = try zgraphy.Search.queryAlloc(std.testing.allocator, &graph, "kerberos", .{ .limit = 3 });
+    defer strong.deinit();
+    try std.testing.expectEqual(zgraphy.Search.Confidence.high, strong.confidence);
+    try std.testing.expectEqual(@as(usize, 0), strong.confidence_reason.len);
+
+    // Five terms, of which the best result can only match one. The score is
+    // normalised so it still reads 1.0 — which is exactly why the score alone
+    // cannot carry this and the verdict has to be stated.
+    var weak = try zgraphy.Search.queryAlloc(std.testing.allocator, &graph, "kerberos quantum ledger telemetry mesh", .{ .limit = 3 });
+    defer weak.deinit();
+    try std.testing.expectEqual(zgraphy.Search.Confidence.low, weak.confidence);
+    try std.testing.expect(weak.confidence_reason.len > 0);
+    try std.testing.expect(weak.items.len > 0);
+    try std.testing.expectEqual(@as(u32, 1), weak.items[0].matched_terms);
+
+    // Nothing matched at all is also an answer not worth acting on.
+    var empty = try zgraphy.Search.queryAlloc(std.testing.allocator, &graph, "zzzznomatch", .{ .limit = 3 });
+    defer empty.deinit();
+    try std.testing.expectEqual(zgraphy.Search.Confidence.low, empty.confidence);
+}
+
 test "zgraphy scores candidates rather than the corpus" {
     var graph = try zgraphy.RepositoryGraph.init(std.testing.allocator, .{});
     defer graph.deinit();

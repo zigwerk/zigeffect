@@ -3,6 +3,12 @@ const model = @import("model.zig");
 const nendb = @import("nendb.zig");
 const owned = @import("memory.zig");
 
+/// Below this IDF a term appears in at least half the corpus. With the smoothed
+/// `ln(1 + N/df)` used above, a term present in every node scores `ln(2)` ~ 0.69
+/// and one present in half scores `ln(3)` ~ 1.10, so 1.0 separates "in most of
+/// the repository" from "actually discriminating".
+const common_term_ceiling: f32 = 1.0;
+
 pub const Options = struct {
     limit: usize = 10,
     keyword_weight: f32 = 0.45,
@@ -16,7 +22,20 @@ pub const Result = struct {
     keyword_score: f32,
     vector_score: f32,
     graph_score: f32,
+    /// How many distinct query terms this node actually matched. A result that
+    /// matched one term of five is a different claim from one that matched all
+    /// five, and the score alone cannot tell them apart.
+    matched_terms: u32 = 0,
 };
+
+/// Whether the ranking is worth acting on, as opposed to being the least-bad
+/// rows available.
+///
+/// An agent cannot distinguish "these are the three functions you want" from
+/// "nothing matched well and here is the top of a flat distribution" by reading
+/// scores, because scores are normalised — the best of a bad set still scores
+/// 1.0. Saying so costs one line and saves a wrong edit.
+pub const Confidence = enum { high, low };
 
 pub const Results = struct {
     allocator: std.mem.Allocator,
@@ -28,6 +47,10 @@ pub const Results = struct {
     scanned: usize = 0,
     /// Nodes in the graph when the query ran, so `scanned` has a denominator.
     corpus: usize = 0,
+    confidence: Confidence = .high,
+    /// Why, when `confidence` is `.low`. Empty otherwise. Stated so the reader
+    /// can disagree with the judgement rather than only receive it.
+    confidence_reason: []const u8 = "",
 
     pub fn deinit(self: *Results) void {
         self.allocator.free(self.items);
@@ -112,6 +135,9 @@ pub fn queryAlloc(
     const seen = try owned.slice(bool, allocator, count);
     defer allocator.free(seen);
     @memset(seen, false);
+    const matched = try owned.slice(u32, allocator, count);
+    defer allocator.free(matched);
+    @memset(matched, 0);
     var candidates: std.ArrayList(u32) = .empty;
     defer candidates.deinit(allocator);
 
@@ -134,6 +160,7 @@ pub fn queryAlloc(
                 best = @max(best, field_weight * frequency_boost);
             }
             keyword[node_index] += best * idf / idf_total;
+            matched[node_index] += 1;
             if (!seen[node_index]) {
                 seen[node_index] = true;
                 try candidates.append(allocator, @intCast(node_index));
@@ -204,6 +231,7 @@ pub fn queryAlloc(
             .keyword_score = keyword[index],
             .vector_score = vector[index],
             .graph_score = graph_scores[index],
+            .matched_terms = matched[index],
         });
     }
     std.mem.sort(Result, ranked.items, {}, struct {
@@ -213,10 +241,34 @@ pub fn queryAlloc(
         }
     }.lessThan);
     const result_count = @min(options.limit, ranked.items.len);
+
+    // Two ways an answer is not worth acting on, both computable from what has
+    // already been derived.
+    var confidence: Confidence = .high;
+    var confidence_reason: []const u8 = "";
+    var strongest_term: f32 = 0;
+    for (idfs) |idf| strongest_term = @max(strongest_term, idf);
+    if (result_count == 0) {
+        confidence = .low;
+        confidence_reason = "nothing matched";
+    } else if (strongest_term < common_term_ceiling) {
+        // Every term in the query appears in a large share of the corpus, so
+        // the ranking is separating nodes on words that discriminate nothing.
+        confidence = .low;
+        confidence_reason = "every query term is common in this repository";
+    } else if (query_terms.items.len > 1 and ranked.items[0].matched_terms * 2 <= query_terms.items.len) {
+        // A multi-term query whose best result matched at most half the terms is
+        // reporting an isolated hit, not a corroborated one.
+        confidence = .low;
+        confidence_reason = "best result matches only part of the query";
+    }
+
     return .{
         .allocator = allocator,
         .items = try owned.copy(Result, allocator, ranked.items[0..result_count]),
         .scanned = candidates.items.len,
         .corpus = count,
+        .confidence = confidence,
+        .confidence_reason = confidence_reason,
     };
 }

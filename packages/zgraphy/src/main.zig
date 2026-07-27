@@ -1022,11 +1022,15 @@ fn runQuery(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, command_
         defer allocator.free(views);
         for (results.items, 0..) |result, index| views[index] = resultView(&loaded.graph, result);
         return writeJson(io, allocator, .{
-            .schema = "zgraphy.query.v3",
+            .schema = "zgraphy.query.v4",
             .query = query,
             .embedder = results.embedder,
             .generation = loaded.refresh.generation,
             .refresh = refreshView(&loaded.refresh),
+            .confidence = @tagName(results.confidence),
+            .confidence_reason = results.confidence_reason,
+            .scanned = results.scanned,
+            .corpus = results.corpus,
             .results = views,
         });
     }
@@ -1043,6 +1047,16 @@ fn runQuery(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, command_
             result.keyword_score,
             result.vector_score,
             result.graph_score,
+        });
+    }
+    // Say it last, where a reader who skimmed the rows still sees it. A ranking
+    // is normalised, so the best of a bad set still scores 1.000 — the number
+    // cannot carry this and silence reads as endorsement.
+    if (results.confidence == .low) {
+        try writeText(io, allocator, "low confidence: {s} (scanned {d} of {d} nodes)\n", .{
+            results.confidence_reason,
+            results.scanned,
+            results.corpus,
         });
     }
 }
