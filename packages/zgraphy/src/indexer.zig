@@ -374,6 +374,7 @@ pub fn buildRepository(
         defer allocator.free(records);
         summary.causal_records = try indexCausalRecords(&graph, causal_wal_path, records);
     }
+    upgradeCorroboratedCalls(&graph);
     summary.nodes = graph.nodeCount();
     summary.edges = graph.edgeCount();
     summary.vectors = graph.vectorCount();
@@ -588,11 +589,73 @@ fn indexParsedZigSource(
             .from = caller,
             .to = target,
             .relation = if (caller_symbol.kind == .test_decl and target_node.kind == .symbol) .covers else .calls,
-            .provenance = if (local_target != null) .extracted else if (graph.findNode(target).?.kind == .concept) .ambiguous else .inferred,
+            .provenance = callProvenance(graph, file_id, local_target, target_node),
             .source_path = path,
             .line = call_fact.callee_span.start_line,
         });
     }
+}
+
+/// How much this call edge is worth believing.
+///
+/// The old rule was `if (local_target != null) .extracted` — whether the callee
+/// was found in the same file. That reports locality and calls it evidence: an
+/// agent filtering on `.extracted` was filtering on "defined nearby", which says
+/// nothing about whether the edge is real.
+///
+/// The corroborating fact was already in the graph and unread. A file's
+/// `imports` edges are written before this loop runs, and 163 of them in this
+/// repository's own index already resolve to `file` nodes with real paths rather
+/// than to unresolved specifiers. So the question "does the caller's file import
+/// the file this symbol lives in" is answerable here, today, without any new
+/// resolution.
+///
+/// The ladder, strongest first:
+///   - same file            -> extracted. The definition is right there.
+///   - imported file        -> extracted. A second fact agrees.
+///   - resolved elsewhere   -> inferred. A name matched; nothing corroborates it.
+///   - invented placeholder -> ambiguous. No definition was found at all.
+///
+/// Unresolved specifiers — package names, anything the import pass could not
+/// place — contribute nothing rather than counting as evidence. An import edge
+/// pointing at `std` cannot corroborate a call to `foo`.
+fn callProvenance(
+    graph: *const model.RepositoryGraph,
+    file_id: u64,
+    local_target: ?u64,
+    target_node: *const model.Node,
+) model.Provenance {
+    if (local_target != null) return .extracted;
+    if (target_node.kind == .concept) return .ambiguous;
+    if (importsFile(graph, file_id, target_node.path)) return .extracted;
+    return .inferred;
+}
+
+/// Exposed for tests: the predicate the evidence ladder rests on is the part
+/// worth pinning, because a wrong answer here labels a guess `.extracted`.
+pub fn importsFileForTest(graph: *const model.RepositoryGraph, file_id: u64, path: []const u8) bool {
+    return importsFile(graph, file_id, path);
+}
+
+pub fn upgradeCorroboratedCallsForTest(graph: *model.RepositoryGraph) void {
+    upgradeCorroboratedCalls(graph);
+}
+
+/// Whether `file_id` has an `imports` edge to a file node at `path`.
+///
+/// Only resolved edges count. An `external_module` target carries the specifier
+/// as written, which is a different namespace from a repository path, and
+/// comparing across the two would match by coincidence.
+fn importsFile(graph: *const model.RepositoryGraph, file_id: u64, path: []const u8) bool {
+    if (path.len == 0) return false;
+    for (graph.outgoingEdges(file_id)) |edge_index| {
+        const edge = graph.edgeAt(edge_index) orelse continue;
+        if (edge.relation != .imports) continue;
+        const imported = graph.findNode(edge.to) orelse continue;
+        if (imported.kind != .file) continue;
+        if (std.mem.eql(u8, imported.path, path)) return true;
+    }
+    return false;
 }
 
 fn calleeLeaf(callee: []const u8) []const u8 {
@@ -1129,6 +1192,35 @@ fn resolveFileImports(graph: *model.RepositoryGraph) !void {
             .source_path = importer.path,
             .line = edge.line,
         });
+    }
+}
+
+/// Promote call edges whose target has an import agreeing with them.
+///
+/// The evidence ladder cannot run where the call is written: `indexParsedZigSource`
+/// decides provenance per file, and the imports it would consult are still
+/// unresolved specifiers at that moment — `resolveFileImports` above is what
+/// turns `./helper.zig` into an edge to a file node, and it runs only once every
+/// file has been seen.
+///
+/// Nor can it run inside `resolveFileImports`: the cross-file calls it would
+/// promote do not exist yet either. `materializeZigResolutions` is what binds a
+/// callee name to a symbol in another file, and it runs after. Placed there this
+/// pass promoted exactly nothing on this repository — 34 extracted edges, all of
+/// them same-file locality from the earlier rule — while the corroboration it
+/// was looking for was present for all 155 cross-file calls.
+///
+/// So it runs last, once both facts exist. Only `.inferred` is promoted:
+/// `.extracted` is already as strong, and `.ambiguous` means no definition was
+/// found at all, which an import cannot fix.
+fn upgradeCorroboratedCalls(graph: *model.RepositoryGraph) void {
+    for (graph.edges.items) |*edge| {
+        if (edge.provenance != .inferred) continue;
+        if (edge.relation != .calls and edge.relation != .covers) continue;
+        const target = graph.findNode(edge.to) orelse continue;
+        if (target.kind != .symbol) continue;
+        const importer = findFileByPath(graph, edge.source_path) orelse continue;
+        if (importsFile(graph, importer.id, target.path)) edge.provenance = .extracted;
     }
 }
 

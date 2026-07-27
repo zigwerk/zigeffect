@@ -1261,6 +1261,72 @@ test "zgraphy graph index round-trips facts and refuses a mismatched source" {
     );
 }
 
+test "a call edge is trusted because a second fact agrees, not because it was nearby" {
+    var graph = try zgraphy.RepositoryGraph.init(std.testing.allocator, .{});
+    defer graph.deinit();
+
+    // Two files. caller.zig imports helper.zig and calls a symbol defined there;
+    // stranger.zig defines a same-named symbol and is imported by nobody.
+    const caller_file = try graph.addSearchableNode(.file, "caller.zig", "src/caller.zig", 1, "caller");
+    const helper_file = try graph.addSearchableNode(.file, "helper.zig", "src/helper.zig", 1, "helper");
+    const corroborated = try graph.addSearchableNode(.symbol, "doWork", "src/helper.zig", 5, "do the work");
+    const uncorroborated = try graph.addSearchableNode(.symbol, "doWork", "src/stranger.zig", 5, "do the work");
+    try graph.addEdge(.{ .from = caller_file, .to = helper_file, .relation = .imports, .provenance = .extracted });
+
+    // The predicate the ladder rests on: an imports edge to the file the symbol
+    // lives in. It is answerable from edges the indexer already wrote.
+    try std.testing.expect(zgraphy.Indexer.importsFileForTest(&graph, caller_file, "src/helper.zig"));
+    try std.testing.expect(!zgraphy.Indexer.importsFileForTest(&graph, caller_file, "src/stranger.zig"));
+
+    // An unresolved specifier is not evidence. An import of "std" cannot
+    // corroborate a call to anything in this repository.
+    const external = try graph.addSearchableNode(.external_module, "std", "std", 1, "std");
+    try graph.addEdge(.{ .from = caller_file, .to = external, .relation = .imports, .provenance = .extracted });
+    try std.testing.expect(!zgraphy.Indexer.importsFileForTest(&graph, caller_file, "std"));
+
+    // Two calls the name-matcher could not tell apart: both land on a symbol
+    // called `doWork`, both start as a guess.
+    try graph.addEdge(.{
+        .from = caller_file,
+        .to = corroborated,
+        .relation = .calls,
+        .provenance = .inferred,
+        .source_path = "src/caller.zig",
+    });
+    try graph.addEdge(.{
+        .from = caller_file,
+        .to = uncorroborated,
+        .relation = .calls,
+        .provenance = .inferred,
+        .source_path = "src/caller.zig",
+    });
+
+    zgraphy.Indexer.upgradeCorroboratedCallsForTest(&graph);
+
+    // Only the one a second fact agrees with is promoted. Asserting the
+    // predicate alone would pass while the pass promoted nothing — which is
+    // precisely what it did when it ran before the call edges existed.
+    try std.testing.expectEqual(
+        zgraphy.Model.Provenance.extracted,
+        callProvenanceOf(&graph, caller_file, corroborated).?,
+    );
+    try std.testing.expectEqual(
+        zgraphy.Model.Provenance.inferred,
+        callProvenanceOf(&graph, caller_file, uncorroborated).?,
+    );
+}
+
+fn callProvenanceOf(
+    graph: *const zgraphy.RepositoryGraph,
+    from: u64,
+    to: u64,
+) ?zgraphy.Model.Provenance {
+    for (graph.edges.items) |edge| {
+        if (edge.relation == .calls and edge.from == from and edge.to == to) return edge.provenance;
+    }
+    return null;
+}
+
 test "a zgroach plan executes against the repository graph" {
     var graph = try zgraphy.RepositoryGraph.init(std.testing.allocator, .{});
     defer graph.deinit();
