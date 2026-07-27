@@ -171,6 +171,10 @@ const GenerationMetadata = struct {
 
 pub const Publication = struct {
     allocator: std.mem.Allocator,
+    /// Whether the working tree was consulted. False on the read path, which
+    /// validates the published generation without hashing the repository — so
+    /// the graph is sound in itself and may not match the files on disk.
+    tree_verified: bool = true,
     status: RefreshStatus,
     trigger: RefreshTrigger,
     activated: bool,
@@ -1309,6 +1313,72 @@ pub fn ensureFresh(
     return publishBuiltLocked(allocator, io, root, config, &built, trigger, true, &.{}, repair_plan);
 }
 
+/// Open the published graph for reading, without consulting the working tree.
+///
+/// `loadManagedGraph` answers a different question than a query asks. It runs
+/// `ensureFresh`, which SHA-256s every file in the repository through
+/// `discovery.scan`, analyses ownership, inspects repository context, and takes
+/// an **exclusive** `UpdateLease` — before the shared read lease is even
+/// acquired. Two concurrent queries therefore fail with `UpdateInProgress`, and
+/// on a 173-file corpus a single query costs 627 ms of which almost none is
+/// retrieval.
+///
+/// The separation this makes: *is my index stale* is a question about the
+/// working tree and belongs to build, watch and status. *Answer my question* is
+/// a question about the published generation and needs only that generation to
+/// be internally sound. This validates the generation exactly as thoroughly as
+/// the write path does — same checks, same failures — and simply does not ask
+/// the first question.
+///
+/// It therefore reports `tree_verified = false`. The graph is guaranteed
+/// consistent with itself and *not* guaranteed to match the files on disk. A
+/// reader that needs the stronger guarantee runs a build. Saying so is the
+/// whole point: a fast answer that quietly might be stale is a worse trade than
+/// the 627 ms it replaces.
+pub fn openManagedGraph(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    root: std.Io.Dir,
+    config: project.Config,
+) !ManagedGraph {
+    try project.validateConfig(config);
+    var reader = try GenerationReadLease.acquireShared(io, root);
+    defer reader.deinit();
+    var active = try readActiveGeneration(allocator, io, root, config);
+    defer active.deinit();
+
+    var loaded = try loadGenerationGraph(allocator, io, root, config, active.value);
+    errdefer loaded.graph.deinit();
+    const plan = try validateLoadedGeneration(allocator, io, root, config, active.value, &loaded);
+    if (plan.action != .none) return error.UnhealthyActiveGeneration;
+
+    const publication = try publicationAlloc(allocator, .{
+        .status = .current,
+        .trigger = .unchanged,
+        .activated = true,
+        .generation = active.value.generation,
+        .previous_generation = active.value.generation,
+        .database = active.value.database,
+        .delta_journal = active.value.delta_journal,
+        .delta_fingerprint = active.value.delta_fingerprint,
+        .delta_summary = active.value.delta_summary,
+        .checked_files = 0,
+        .reparsed_files = 0,
+        .cache_hits = 0,
+        .cache_misses = 0,
+        .cache_rejected = 0,
+        .cache_writes = 0,
+        .direct_invalidations = 0,
+        .invalidation_closure = 0,
+        .pruned = .{},
+        .origin = active.value.origin_summary,
+        .repair = active.value.repair_summary,
+        .retention = .{},
+        .tree_verified = false,
+    });
+    return .{ .graph = loaded.graph, .refresh = publication, .recovery_source = loaded.recovery_source };
+}
+
 pub fn loadManagedGraph(
     allocator: std.mem.Allocator,
     io: std.Io,
@@ -1485,6 +1555,9 @@ fn wallTimeMillis(io: std.Io) u64 {
 }
 
 const PublicationInput = struct {
+    /// Defaults true so every existing construction site keeps its meaning;
+    /// only the read path sets it false.
+    tree_verified: bool = true,
     status: RefreshStatus,
     trigger: RefreshTrigger,
     activated: bool,
@@ -1521,6 +1594,7 @@ fn publicationAlloc(allocator: std.mem.Allocator, input: PublicationInput) !Publ
     errdefer allocator.free(delta_fingerprint);
     return .{
         .allocator = allocator,
+        .tree_verified = input.tree_verified,
         .status = input.status,
         .trigger = input.trigger,
         .activated = input.activated,
@@ -2101,6 +2175,24 @@ fn activeGenerationHealthy(
 ) !repair.Plan {
     var loaded = try loadGenerationGraph(allocator, io, root, config, pointer);
     defer loaded.graph.deinit();
+    return validateLoadedGeneration(allocator, io, root, config, pointer, &loaded);
+}
+
+/// Every check `activeGenerationHealthy` performs, against a generation the
+/// caller has already loaded.
+///
+/// Split out because the read path loaded the graph, then called
+/// `activeGenerationHealthy`, which loaded it a second time to validate it, and
+/// then threw that copy away. On an 8,102-node graph that is the difference
+/// between materialising the database once per query and twice.
+fn validateLoadedGeneration(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    root: std.Io.Dir,
+    config: project.Config,
+    pointer: ActiveGeneration,
+    loaded: *LoadedGeneration,
+) !repair.Plan {
     if (!freshness.inspect(&loaded.graph).clean()) return error.UnhealthyActiveGeneration;
     const fingerprint = try freshness.fingerprint(allocator, &loaded.graph);
     const identity = sha256Identity(fingerprint);

@@ -1013,7 +1013,7 @@ fn runQualityMatrix(
 fn runQuery(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, command_line: zstd.Cli.ParsedCommand) !void {
     const query = command_line.positional(0) orelse return error.MissingQuery;
     const limit = try numericOptionOf(command_line, "limit", 10, 1, 1024);
-    var loaded = try loadGraph(allocator, io, root);
+    var loaded = try openGraph(allocator, io, root);
     defer loaded.deinit();
     var results = try zgraphy.Search.queryAlloc(allocator, &loaded.graph, query, .{ .limit = limit });
     defer results.deinit();
@@ -1027,6 +1027,7 @@ fn runQuery(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, command_
             .embedder = results.embedder,
             .generation = loaded.refresh.generation,
             .refresh = refreshView(&loaded.refresh),
+            .tree_verified = loaded.refresh.tree_verified,
             .confidence = @tagName(results.confidence),
             .confidence_reason = results.confidence_reason,
             .scanned = results.scanned,
@@ -1059,11 +1060,19 @@ fn runQuery(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, command_
             results.corpus,
         });
     }
+    // The read path does not hash the working tree, so the answer is consistent
+    // with the published generation and may not match the files on disk. An
+    // unreported caveat is the same defect as no caveat.
+    if (!loaded.refresh.tree_verified) {
+        try writeText(io, allocator, "generation {s}; working tree not checked — run `zgraphy build` to refresh\n", .{
+            loaded.refresh.generation,
+        });
+    }
 }
 
 fn runExplain(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, command_line: zstd.Cli.ParsedCommand) !void {
     const selector = command_line.positional(0) orelse return error.MissingNode;
-    var loaded = try loadGraph(allocator, io, root);
+    var loaded = try openGraph(allocator, io, root);
     defer loaded.deinit();
     const node = findNode(&loaded.graph, selector) orelse return error.NodeNotFound;
     var outgoing: usize = 0;
@@ -1161,7 +1170,7 @@ fn runPath(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, command_l
     const from_selector = command_line.positional(0) orelse return error.MissingFromNode;
     const to_selector = command_line.positional(1) orelse return error.MissingToNode;
     const max_hops = try numericOptionOf(command_line, "max-hops", 8, 1, 128);
-    var loaded = try loadGraph(allocator, io, root);
+    var loaded = try openGraph(allocator, io, root);
     defer loaded.deinit();
     const from = findNode(&loaded.graph, from_selector) orelse return error.NodeNotFound;
     const to = findNode(&loaded.graph, to_selector) orelse return error.NodeNotFound;
@@ -1196,6 +1205,22 @@ const LoadedGraph = struct {
     }
 };
 
+/// Read-only open, for commands that answer questions about the published
+/// graph rather than about the working tree. Does not hash the repository and
+/// takes only a shared lease, so concurrent queries succeed.
+fn openGraph(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir) !LoadedGraph {
+    var config = try zgraphy.Project.loadConfig(allocator, io, root);
+    defer config.deinit();
+    const managed = try zgraphy.Operations.openManagedGraph(allocator, io, root, config.value);
+    return .{
+        .graph = managed.graph,
+        .refresh = managed.refresh,
+        .recovery_source = managed.recovery_source,
+    };
+}
+
+/// Verified open: consults the working tree and refreshes if it has moved.
+/// `status` reports freshness, so it must pay for the answer it prints.
 fn loadGraph(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir) !LoadedGraph {
     var config = try zgraphy.Project.loadConfig(allocator, io, root);
     defer config.deinit();
