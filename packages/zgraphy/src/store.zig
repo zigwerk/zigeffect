@@ -1,4 +1,6 @@
 const std = @import("std");
+const freshness = @import("freshness.zig");
+const graph_index = @import("graph_index.zig");
 const model = @import("model.zig");
 const nendb = @import("nendb.zig");
 const semantic_recipes = @import("semantic_recipes.zig");
@@ -211,6 +213,71 @@ pub fn save(io: std.Io, dir: std.Io.Dir, path: []const u8, graph: *const model.R
     defer graph.allocator.free(bytes);
     if (bytes.len > max_snapshot_bytes) return error.SnapshotTooLarge;
     try writeAtomic(graph.allocator, io, dir, path, bytes);
+    writeDerivedIndex(io, dir, path, graph, bytes);
+}
+
+pub fn indexPathAlloc(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
+    return std.fmt.allocPrint(allocator, "{s}.idx", .{path});
+}
+
+/// Write the derived index beside a snapshot, only after that snapshot is
+/// durable. Best effort: the snapshot is the truth, and failing to write a cache
+/// must never fail a publish.
+fn writeDerivedIndex(
+    io: std.Io,
+    dir: std.Io.Dir,
+    path: []const u8,
+    graph: *const model.RepositoryGraph,
+    snapshot_bytes: []const u8,
+) void {
+    const allocator = graph.allocator;
+    const index_path = indexPathAlloc(allocator, path) catch return;
+    defer allocator.free(index_path);
+    const fingerprint = freshness.fingerprint(allocator, graph) catch return;
+    const encoded = graph_index.encodeAlloc(allocator, graph, fingerprint, snapshotCrc(snapshot_bytes)) catch {
+        dir.deleteFile(io, index_path) catch {};
+        return;
+    };
+    defer allocator.free(encoded);
+    dir.writeFile(io, .{ .sub_path = index_path, .data = encoded }) catch {
+        dir.deleteFile(io, index_path) catch {};
+    };
+}
+
+/// Load a snapshot, skipping the *parse* when a derived index can be trusted.
+///
+/// The snapshot is still read and still checksummed, so a damaged one is still
+/// detected and still reaches recovery with its real provenance. Three
+/// independent conditions, each covering what the others cannot: the CRC says
+/// the snapshot is byte-identical to the one the index was built from; the
+/// digest says the index belongs to the generation being asked for; and the
+/// rebuilt graph's own fingerprint says the format actually reproduced it, which
+/// matters because the encoder is lossy for record kinds it does not model.
+pub fn loadPreferringIndex(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    dir: std.Io.Dir,
+    path: []const u8,
+    expected_fingerprint: [32]u8,
+    options: model.Options,
+) !model.RepositoryGraph {
+    try validatePath(path);
+    const bytes = try dir.readFileAlloc(io, path, allocator, .limited(max_snapshot_bytes));
+    defer allocator.free(bytes);
+    if (indexPathAlloc(allocator, path)) |index_path| {
+        defer allocator.free(index_path);
+        if (dir.readFileAlloc(io, index_path, allocator, .limited(max_snapshot_bytes))) |encoded| {
+            defer allocator.free(encoded);
+            if (graph_index.decode(allocator, encoded, expected_fingerprint, snapshotCrc(bytes), options)) |rebuilt| {
+                var candidate = rebuilt;
+                if (freshness.fingerprint(allocator, &candidate)) |actual| {
+                    if (std.mem.eql(u8, &actual, &expected_fingerprint)) return candidate;
+                } else |_| {}
+                candidate.deinit();
+            } else |_| {}
+        } else |_| {}
+    } else |_| {}
+    return loadFromBytes(allocator, bytes, options);
 }
 
 pub fn load(
@@ -223,6 +290,20 @@ pub fn load(
     try validatePath(path);
     const bytes = try dir.readFileAlloc(io, path, allocator, .limited(max_snapshot_bytes));
     defer allocator.free(bytes);
+    return loadFromBytes(allocator, bytes, options);
+}
+
+pub fn snapshotCrc(bytes: []const u8) u32 {
+    return std.hash.crc.Crc32Iscsi.hash(bytes);
+}
+
+/// Parse a snapshot already read into memory, so the index path can checksum the
+/// same bytes it would otherwise have parsed rather than reading the file twice.
+pub fn loadFromBytes(
+    allocator: std.mem.Allocator,
+    bytes: []const u8,
+    options: model.Options,
+) !model.RepositoryGraph {
     var graph = try model.RepositoryGraph.init(allocator, options);
     errdefer graph.deinit();
     var saw_header = false;

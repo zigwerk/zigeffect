@@ -2120,7 +2120,15 @@ fn loadGenerationGraph(
     pointer: ActiveGeneration,
 ) !LoadedGeneration {
     var snapshot_failure: ?anyerror = null;
-    const snapshot: ?model.RepositoryGraph = store.load(allocator, io, root, pointer.database, graphOptions(config)) catch |failure| blk: {
+    // Skips the parse, not the read: the snapshot is still loaded and
+    // checksummed, so a damaged one still reaches recovery with its real
+    // provenance. Everything downstream runs unchanged on whichever graph
+    // comes back.
+    const expected = parseSha256Identity(pointer.graph_fingerprint);
+    const snapshot: ?model.RepositoryGraph = (if (expected) |digest|
+        store.loadPreferringIndex(allocator, io, root, pointer.database, digest, graphOptions(config))
+    else
+        store.load(allocator, io, root, pointer.database, graphOptions(config))) catch |failure| blk: {
         snapshot_failure = failure;
         break :blk null;
     };
@@ -2625,6 +2633,16 @@ fn generationIdentity(
     output[0..2].* = "g-".*;
     output[2..].* = std.fmt.bytesToHex(digest, .lower);
     return output;
+}
+
+/// Inverse of `sha256Identity`. Null for anything that is not exactly the shape
+/// we write, so a malformed pointer falls back rather than matching by accident.
+fn parseSha256Identity(identity: []const u8) ?[32]u8 {
+    if (identity.len != 71) return null;
+    if (!std.mem.startsWith(u8, identity, "sha256:")) return null;
+    var digest: [32]u8 = undefined;
+    _ = std.fmt.hexToBytes(&digest, identity[7..]) catch return null;
+    return digest;
 }
 
 fn sha256Identity(digest: [32]u8) [71]u8 {
