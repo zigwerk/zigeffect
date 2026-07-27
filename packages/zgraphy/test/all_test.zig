@@ -1261,6 +1261,34 @@ test "zgraphy graph index round-trips facts and refuses a mismatched source" {
     );
 }
 
+test "a local binding lifts the symbol that declares it instead of outranking it" {
+    var graph = try zgraphy.RepositoryGraph.init(std.testing.allocator, .{});
+    defer graph.deinit();
+
+    // The shape that made `digest` return seven local variables and no
+    // definition: a symbol whose name contains the term, and the `const digest`
+    // inside it, which carries the binding's source as search text and so
+    // matches the term more densely than the function does.
+    const symbol = try graph.addSearchableNode(.symbol, "catalogDigest", "src/baseline.zig", 10, "compute the catalog digest");
+    const binding = try graph.addSearchableNode(.concept, "digest", "src/baseline.zig", 12, "const digest = hasher.digest();");
+    try graph.addEdge(.{ .from = symbol, .to = binding, .relation = .declares, .provenance = .extracted });
+
+    var results = try zgraphy.Search.queryAlloc(std.testing.allocator, &graph, "digest", .{ .limit = 10 });
+    defer results.deinit();
+
+    // The binding is not a place to go: it has no outgoing edges and naming it
+    // answers nothing.
+    for (results.items) |item| try std.testing.expect(item.node_id != binding);
+
+    // But it is not discarded either — it is scored first and withheld after, so
+    // its match still reaches the symbol across `declares`. Asserting only its
+    // absence would pass just as well if the filter ran before propagation and
+    // threw the evidence away.
+    try std.testing.expectEqual(@as(usize, 1), results.items.len);
+    try std.testing.expectEqual(symbol, results.items[0].node_id);
+    try std.testing.expect(results.items[0].graph_score > 0);
+}
+
 test "a call edge is trusted because a second fact agrees, not because it was nearby" {
     var graph = try zgraphy.RepositoryGraph.init(std.testing.allocator, .{});
     defer graph.deinit();

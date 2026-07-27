@@ -242,6 +242,12 @@ pub fn queryAlloc(
     var ranked: std.ArrayList(Result) = .empty;
     defer ranked.deinit(allocator);
     for (candidates.items) |index| {
+        // Scored, then withheld — and the order matters. A node that is not a
+        // destination has already done its work by this point: it contributed
+        // its `base` to the graph propagation above, so a local binding matching
+        // the query lifts the symbol that declares it. Filtering earlier would
+        // have discarded that evidence along with the answer.
+        if (!graph.nodeAt(index).kind.isAnswer()) continue;
         const score = (options.keyword_weight * keyword[index] +
             options.vector_weight * vector[index] +
             options.graph_weight * graph_scores[index]) / weight_sum;

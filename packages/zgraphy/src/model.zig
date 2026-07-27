@@ -27,6 +27,57 @@ pub const NodeKind = enum(u8) {
     operation,
     message,
     field,
+
+    /// Whether a node of this kind can be the answer to "where is the code
+    /// that does X".
+    ///
+    /// Not every indexed node is a destination. A `concept` is a local `const`
+    /// binding or a callee name that did not resolve — real facts, worth
+    /// carrying, and never somewhere an agent can go. Measured on this
+    /// repository they were **61.5% of the node table**, and because they carry
+    /// the binding's source as search text they won on the terms they contain:
+    /// the query `digest` returned seven local variables in its top eight, each
+    /// naming a file, none naming a definition, none leading anywhere — every
+    /// `concept` node here has zero outgoing edges.
+    ///
+    /// Excluding them from *answers* is not the same as excluding them from the
+    /// index, and the difference is the point. A binding named `digest` inside
+    /// `catalogDigest` is evidence that `catalogDigest` is what was asked for.
+    /// It keeps its postings and still propagates its score across the
+    /// `declares` edge; it simply stops competing with the symbol it belongs to.
+    ///
+    /// Exhaustive on purpose: a new kind must state whether it is a destination
+    /// rather than inherit an answer from whichever branch it happens to fall
+    /// into.
+    pub fn isAnswer(self: NodeKind) bool {
+        return switch (self) {
+            .concept => false,
+            .repository,
+            .directory,
+            .file,
+            .symbol,
+            .external_module,
+            .component,
+            .requirement,
+            .acceptance_check,
+            .command,
+            .test_scenario,
+            .causal_event,
+            .workspace,
+            .package,
+            .application,
+            .library,
+            .build_target,
+            .api_surface,
+            .module_reference,
+            .type,
+            .service,
+            .operation,
+            .message,
+            .field,
+            => true,
+        };
+    }
 };
 
 pub const Relation = enum(u16) {
