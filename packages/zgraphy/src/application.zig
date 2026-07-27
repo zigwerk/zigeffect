@@ -24,6 +24,7 @@ const common_options = [_]zstd.Cli.OptionSpec{
     .{ .name = "configuration" },
     .{ .name = "correctness" },
     .{ .name = "budget", .kind = .integer },
+    .{ .name = "source", .kind = .integer },
     .{ .name = "debounce-ms", .kind = .integer },
     .{ .name = "graphify-environment" },
     .{ .name = "graphify-python" },

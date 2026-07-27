@@ -1033,6 +1033,9 @@ fn runQuery(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, command_
     const query = command_line.positional(0) orelse return error.MissingQuery;
     const limit = try numericOptionOf(command_line, "limit", 10, 1, 1024);
     const budget_tokens = try numericOptionOf(command_line, "budget", 2000, 64, 200_000);
+    // Default 3: enough to see a signature and its first statements without
+    // turning the answer into the file.
+    const source_context: u32 = @intCast(try numericOptionOf(command_line, "source", 3, 0, 40));
     const budget_chars = budget_tokens * 3;
     var loaded = try openGraph(allocator, io, root);
     defer loaded.deinit();
@@ -1086,6 +1089,9 @@ fn runQuery(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, command_
             result.vector_score,
             result.graph_score,
         });
+        if (source_context > 0 and node.path.len > 0 and node.line > 0) {
+            spent_chars += writeSourceWindow(io, allocator, root, node.path, node.line, source_context) catch 0;
+        }
     }
     // Say it last, where a reader who skimmed the rows still sees it. A ranking
     // is normalised, so the best of a bad set still scores 1.000 — the number
@@ -1114,6 +1120,45 @@ fn runQuery(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, command_
             loaded.refresh.generation,
         });
     }
+}
+
+/// A source window is a reading aid, not a file transfer. Anything larger is a
+/// generated file whose middle nobody wants.
+const max_source_window_bytes: usize = 1 << 20;
+
+/// Read the lines around `line` from `path`, sanitized and bounded.
+///
+/// The point: an agent handed `foo [symbol] src/a.zig:42` still has to open the
+/// file, which is a second tool call and a second round trip. Returning the
+/// source it would have read makes the answer usable on its own.
+///
+/// Every byte here came from an indexed third-party repository, so it goes
+/// through the same sanitizer as labels and paths. This is the render path
+/// growing, which is exactly why that landed first.
+fn writeSourceWindow(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    root: std.Io.Dir,
+    path: []const u8,
+    line: u32,
+    context: u32,
+) !usize {
+    const bytes = root.readFileAlloc(io, path, allocator, .limited(max_source_window_bytes)) catch return 0;
+    defer allocator.free(bytes);
+    const first: u32 = if (line > context) line - context else 1;
+    const last: u32 = line + context;
+    var current: u32 = 1;
+    var written: usize = 0;
+    var lines = std.mem.splitScalar(u8, bytes, '\n');
+    while (lines.next()) |text| : (current += 1) {
+        if (current < first) continue;
+        if (current > last) break;
+        var buffer: zgraphy.Sanitize.Buffer = undefined;
+        const marker: []const u8 = if (current == line) ">" else " ";
+        try writeText(io, allocator, "    {s}{d: >5} {s}\n", .{ marker, current, zgraphy.Sanitize.clean(&buffer, text) });
+        written += text.len + 8;
+    }
+    return written;
 }
 
 fn runExplain(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, command_line: zstd.Cli.ParsedCommand) !void {
