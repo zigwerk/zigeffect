@@ -20,6 +20,8 @@ pub fn build(b: *std.Build) void {
     const parser = parser_dep.module("zigeffect_parser");
     const zgdb_dep = b.dependency("zgdb", .{ .target = target, .optimize = optimize });
     const zgdb = zgdb_dep.module("zgdb");
+    const zgroach_dep = b.dependency("zgroach", .{ .target = target, .optimize = optimize });
+    const zgroach = zgroach_dep.module("zgroach");
     const benchmark_assets = b.createModule(.{
         .root_source_file = b.path("benchmarks/embedded.zig"),
         .target = target,
@@ -33,6 +35,7 @@ pub fn build(b: *std.Build) void {
     zgraphy.addImport("zigeffect_std", zstd);
     zgraphy.addImport("zigeffect_parser", parser);
     zgraphy.addImport("zgdb", zgdb);
+    zgraphy.addImport("zgroach", zgroach);
     zgraphy.addImport("zgraphy_benchmark_assets", benchmark_assets);
 
     const cli_module = b.createModule(.{
@@ -73,6 +76,8 @@ pub fn build(b: *std.Build) void {
     zgraphy_test.addImport("zigeffect_std", zstd_test);
     zgraphy_test.addImport("zigeffect_parser", parser_test);
     zgraphy_test.addImport("zgdb", zgdb_test_dep.module("zgdb"));
+    const zgroach_test_dep = b.dependency("zgroach", .{ .target = target, .optimize = test_optimize });
+    zgraphy_test.addImport("zgroach", zgroach_test_dep.module("zgroach"));
     zgraphy_test.addImport("zgraphy_benchmark_assets", benchmark_assets_test);
 
     const tests_module = b.createModule(.{
@@ -81,6 +86,7 @@ pub fn build(b: *std.Build) void {
         .optimize = test_optimize,
     });
     tests_module.addImport("zgraphy", zgraphy_test);
+    tests_module.addImport("zgroach", zgroach_test_dep.module("zgroach"));
     tests_module.addImport("zigeffect_std", zstd_test);
 
     // Hand the installed-process test the compiled executable path. Wiring it as

@@ -1,5 +1,6 @@
 const std = @import("std");
 const zgraphy = @import("zgraphy");
+const zgroach = @import("zgroach");
 const zstd = @import("zigeffect_std");
 // Path to the installed zgraphy executable, injected by build.zig so the
 // installed-process boundary test spawns the real binary rather than runOneShot.
@@ -1258,6 +1259,41 @@ test "zgraphy graph index round-trips facts and refuses a mismatched source" {
         zgraphy.GraphIndex.Error.IndexUnusable,
         zgraphy.GraphIndex.decode(std.testing.allocator, encoded, digest, snapshot_crc +% 1, .{}),
     );
+}
+
+test "a zgroach plan executes against the repository graph" {
+    var graph = try zgraphy.RepositoryGraph.init(std.testing.allocator, .{});
+    defer graph.deinit();
+    const handler = try graph.addSearchableNode(.symbol, "PaymentHandler", "src/payment.zig", 10, "process card payment authorization");
+    _ = try graph.addSearchableNode(.symbol, "OrderService", "src/order.zig", 4, "create and cancel orders");
+
+    var connector = zgraphy.QueryBackend.RepositoryBackend{ .graph = &graph };
+    const backend = connector.backend();
+
+    // Equality on a declared column.
+    const by_label = try zgroach.Plan.Builder.matching(&.{.{ .field = "label", .match = .{ .text = "PaymentHandler" } }}).build();
+    var exact = try backend.execute(std.testing.allocator, by_label);
+    defer exact.deinit(std.testing.allocator);
+    try std.testing.expectEqualSlices(u64, &.{handler}, exact.ids);
+
+    // Full-text over the store's own posting lists, not a scan of the text.
+    const lexical = try zgroach.Plan.Builder.matching(&.{.{ .field = "search_text", .match = .{ .lexical = "card payment" } }}).build();
+    var ranked = try backend.execute(std.testing.allocator, lexical);
+    defer ranked.deinit(std.testing.allocator);
+    try std.testing.expectEqualSlices(u64, &.{handler}, ranked.ids);
+
+    // Every term must appear: one word of two is not what was asked for, and
+    // without a score there is no way to report that it matched less.
+    const partial = try zgroach.Plan.Builder.matching(&.{.{ .field = "search_text", .match = .{ .lexical = "card zzznomatch" } }}).build();
+    var none = try backend.execute(std.testing.allocator, partial);
+    defer none.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 0), none.ids.len);
+
+    // And the capability boundary is real: this connector does not rank by
+    // distance, so a similarity plan is refused before it touches the store.
+    const probe = [_]f32{ 0.1, 0.2 };
+    const similar = try zgroach.Plan.Builder.matching(&.{.{ .field = "search_text", .match = .{ .similar = &probe } }}).build();
+    try std.testing.expectError(error.UnsupportedByBackend, backend.check(similar));
 }
 
 test "zgraphy blast radius walks against the edges and stops at hubs" {
