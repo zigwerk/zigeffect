@@ -45,6 +45,21 @@ fn runCommand(ctx: *zstd.fx.kernel.ContextView(zgraphy.Application.ApplicationSe
 /// Only errors where the name genuinely withholds the fix belong here. An error
 /// that already says what to do does not need a second voice.
 fn explainFailure(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, failure: anyerror) !void {
+    switch (failure) {
+        // Detection already works: a damaged generation fails closed rather than
+        // answering from it. What it does not do is say so. A Zig stack trace
+        // ending in InvalidGenerationMetadata reads as a defect in zgraphy; it
+        // is a damaged file with a documented repair.
+        error.InvalidGenerationMetadata,
+        error.CorruptGenerationMetadata,
+        error.UnhealthyActiveGeneration,
+        error.ActiveGenerationFingerprintMismatch,
+        error.ActiveGenerationSecondaryIndexMismatch,
+        error.CorruptActiveGeneration,
+        => return writeText(io, allocator, "the published graph is damaged and was not used to answer\n" ++
+            "run `zgraphy build` to republish it from source\n", .{}),
+        else => {},
+    }
     const key: []const u8, const limit: usize = switch (failure) {
         error.NodeCapacityExceeded => .{ "max_nodes", blk: {
             var config = zgraphy.Project.loadConfig(allocator, io, root) catch break :blk 0;
