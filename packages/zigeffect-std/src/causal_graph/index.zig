@@ -22,7 +22,7 @@
 
 const std = @import("std");
 
-pub const schema = "zigeffect.causal.local-graph-index.v1";
+pub const schema = "zigeffect.causal.local-graph-index.v2";
 pub const schema_version: u32 = 2;
 pub const default_index_name = "causal-graph.index";
 

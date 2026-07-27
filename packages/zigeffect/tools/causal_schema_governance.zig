@@ -91,7 +91,7 @@ const schema_entries: []const SchemaEntry = &.{
         .governance_requirements = &.{ "NenDB adapter tests", "durable history report tests", "docs" },
     },
     .{
-        .schema = "zigeffect.causal.local-graph-index.v1",
+        .schema = "zigeffect.causal.local-graph-index.v2",
         .version = 2,
         .category = "app-runtime",
         .status = "current",
@@ -726,7 +726,7 @@ test "schema governance usage names command and formats" {
 
 test "schema governance inventory includes official schemas and excludes fake fixtures" {
     const entries = schemaEntries();
-    try std.testing.expectEqual(@as(usize, 45), entries.len);
+    try std.testing.expectEqual(@as(usize, 49), entries.len);
     try expectSchema(entries, "zigeffect.causal.v1");
     try expectSchema(entries, "zigeffect.causal.event.v1");
     try expectSchema(entries, "zigeffect.causal.app-application.v1");
@@ -748,7 +748,18 @@ test "schema governance inventory includes official schemas and excludes fake fi
 test "schema governance entries have required metadata" {
     for (schemaEntries()) |entry| {
         try std.testing.expect(entry.schema.len > 0);
-        try std.testing.expectEqual(@as(u32, 1), entry.version);
+        try std.testing.expect(entry.version > 0);
+        // The name carries the version, so a bump that forgets the suffix — or a
+        // suffix that outruns the bump — is a lie about compatibility. This is
+        // how local-graph-index sat at `.v1` with version 2 for a whole
+        // milestone: the old rule asserted every schema was version 1, so the
+        // only thing it could catch was a correct bump.
+        var suffix: [16]u8 = undefined;
+        try std.testing.expect(std.mem.endsWith(
+            u8,
+            entry.schema,
+            try std.fmt.bufPrint(&suffix, ".v{d}", .{entry.version}),
+        ));
         try std.testing.expect(entry.category.len > 0);
         try std.testing.expect(entry.status.len > 0);
         try std.testing.expect(entry.emitted_by.len > 0);
@@ -764,7 +775,7 @@ test "schema governance text report includes policy and representative schemas" 
 
     try std.testing.expect(std.mem.indexOf(u8, report, "zigeffect causal schema governance") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "schema: zigeffect.causal.schema-governance.v1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "schema count: 45") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "schema count: 49") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "event taxonomy version: 1") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "versioning policy:") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "migration policy:") != null);
@@ -787,7 +798,7 @@ test "schema governance json report is machine readable" {
     try std.testing.expect(std.mem.indexOf(u8, report, "\"schema_version\": 1") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"current_core_schema\": \"zigeffect.causal.v1\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"current_event_taxonomy_version\": 1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, report, "\"schema_count\": 45") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"schema_count\": 49") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"schema\": \"zigeffect.causal.local-graph-lineage.v1\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"schemas\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "\"compatibility\"") != null);
