@@ -2109,7 +2109,7 @@ fn validateCandidate(
     try validatePublishedHeaders(allocator, io, root, config, pointer);
     try validateExtractionManifest(allocator, io, root, pointer);
     try validateRepositoryContextAndLineage(allocator, io, root, pointer, &loaded);
-    try validateOriginAndRepair(allocator, io, root, pointer, &loaded);
+    try validateOriginAndRepair(allocator, io, root, pointer, &loaded, false);
 }
 
 fn loadGenerationGraph(
@@ -2208,7 +2208,7 @@ fn validateLoadedGeneration(
     try validatePublishedHeaders(allocator, io, root, config, pointer);
     try validateExtractionManifest(allocator, io, root, pointer);
     try validateRepositoryContextAndLineage(allocator, io, root, pointer, &loaded.graph);
-    try validateOriginAndRepair(allocator, io, root, pointer, &loaded.graph);
+    try validateOriginAndRepair(allocator, io, root, pointer, &loaded.graph, true);
     if (loaded.recovery_source == .full_snapshot) {
         if (delta_journal.inspect(allocator, io, root, pointer.delta_journal)) |inspection_value| {
             var inspection = inspection_value;
@@ -2246,7 +2246,7 @@ fn activeCheckpointComplete(
     try validatePublishedHeaders(allocator, io, root, config, pointer);
     try validateExtractionManifest(allocator, io, root, pointer);
     try validateRepositoryContextAndLineage(allocator, io, root, pointer, &graph);
-    try validateOriginAndRepair(allocator, io, root, pointer, &graph);
+    try validateOriginAndRepair(allocator, io, root, pointer, &graph, false);
 }
 
 fn validateDeltaBindings(pointer: ActiveGeneration, info: delta_journal.Inspection) !void {
@@ -2403,10 +2403,14 @@ fn validateOriginAndRepair(
     root: std.Io.Dir,
     pointer: ActiveGeneration,
     graph: *const model.RepositoryGraph,
+    graph_already_validated: bool,
 ) !void {
     var origin = try origin_ledger.read(allocator, io, root, pointer.origin_ledger);
     defer origin.deinit();
-    try origin_ledger.validate(graph, origin.value);
+    // `graph_already_validated` is only true because `validateLoadedGeneration`
+    // ran exactly these checks on this graph object a few statements earlier.
+    // Any other caller of validateOriginAndRepair must keep it false.
+    try origin_ledger.validateWithOptions(graph, origin.value, .{ .graph_already_validated = graph_already_validated });
     if (!std.mem.eql(u8, origin.value.repository_id, pointer.repository_id) or
         !std.mem.eql(u8, origin.value.target_generation, pointer.semantic_generation) or
         !std.mem.eql(u8, origin.value.input_fingerprint, pointer.origin_input_fingerprint) or
@@ -3025,7 +3029,7 @@ pub fn doctor(
                 .replay_command = "zgraphy build --json",
             });
         }
-        validateOriginAndRepair(allocator, io, root, parsed.value, &loaded_generation.graph) catch |failure| {
+        validateOriginAndRepair(allocator, io, root, parsed.value, &loaded_generation.graph, false) catch |failure| {
             report.status = .degraded;
             report.dimensions.self_manager = .degraded;
             report.addDiagnostic(.{

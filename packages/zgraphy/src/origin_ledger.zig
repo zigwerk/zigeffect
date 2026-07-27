@@ -313,7 +313,25 @@ pub fn reconcile(allocator: std.mem.Allocator, input: ReconcileInput) !Reconcili
     return .{ .allocator = allocator, .graph = canonical, .value = artifact };
 }
 
+pub const ValidateOptions = struct {
+    /// Skip the graph checks this function would otherwise repeat.
+    ///
+    /// `validate` re-runs `validateSemanticRecords`, `semantic_recipes.validateGraph`
+    /// and `validateSecondaryIndexes` on the caller's graph. That is right when
+    /// the caller has not already done it, and pure repetition when it has — and
+    /// on the read path it has, ten lines earlier, on the same graph object.
+    /// Measured at 34 ms of a 55 ms validate on an 8,102-node graph.
+    ///
+    /// Off by default, so every existing caller keeps the checks. Passing true is
+    /// a claim the caller must actually be able to make.
+    graph_already_validated: bool = false,
+};
+
 pub fn validate(graph: *const model.RepositoryGraph, artifact: Artifact) !void {
+    return validateWithOptions(graph, artifact, .{});
+}
+
+pub fn validateWithOptions(graph: *const model.RepositoryGraph, artifact: Artifact, options: ValidateOptions) !void {
     if (!artifact.complete or !std.mem.eql(u8, artifact.schema, schema) or artifact.schema_version != schema_version or
         artifact.repository_id.len == 0 or !validGenerationId(artifact.target_generation) or
         !validSha256Identity(artifact.input_fingerprint) or !validSha256Identity(artifact.fingerprint) or
@@ -321,9 +339,11 @@ pub fn validate(graph: *const model.RepositoryGraph, artifact: Artifact) !void {
     {
         return error.InvalidOriginArtifact;
     }
-    try graph.validateSemanticRecords();
-    try semantic_recipes.validateGraph(graph);
-    try graph.validateSecondaryIndexes();
+    if (!options.graph_already_validated) {
+        try graph.validateSemanticRecords();
+        try semantic_recipes.validateGraph(graph);
+        try graph.validateSecondaryIndexes();
+    }
     for (artifact.owners, 0..) |owner, index| {
         try validateOwner(graph.allocator, owner);
         if (index > 0 and !ownerLessThan({}, artifact.owners[index - 1], owner)) return error.NonCanonicalOriginOwners;
