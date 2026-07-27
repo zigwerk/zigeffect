@@ -1167,6 +1167,29 @@ test "zgraphy repository graph builds an initialized local fixture deterministic
     try std.testing.expect(built.graph.findNodeByLabel("ignored.zig") == null);
 }
 
+test "zgraphy retrieval weights a rare term above a common one" {
+    var graph = try zgraphy.RepositoryGraph.init(std.testing.allocator, .{});
+    defer graph.deinit();
+
+    // "service" appears in every node: it carries almost no information about
+    // which node the reader wants. "kerberos" appears in exactly one.
+    _ = try graph.addSearchableNode(.symbol, "AlphaService", "src/alpha.zig", 1, "service handler");
+    _ = try graph.addSearchableNode(.symbol, "BetaService", "src/beta.zig", 1, "service handler");
+    _ = try graph.addSearchableNode(.symbol, "GammaService", "src/gamma.zig", 1, "service handler");
+    _ = try graph.addSearchableNode(.symbol, "DeltaService", "src/delta.zig", 1, "service handler");
+    const rare = try graph.addSearchableNode(.symbol, "KerberosTicket", "src/kerberos.zig", 1, "kerberos ticket exchange");
+
+    // Both terms are asked for. Without IDF each contributes the same weight, so
+    // the four common nodes tie with — and by index order precede — the one node
+    // that actually matched the discriminating term.
+    var results = try zgraphy.Search.queryAlloc(std.testing.allocator, &graph, "service kerberos", .{ .limit = 5 });
+    defer results.deinit();
+
+    try std.testing.expect(results.items.len >= 2);
+    try std.testing.expectEqual(rare, results.items[0].node_id);
+    try std.testing.expect(results.items[0].keyword_score > results.items[1].keyword_score);
+}
+
 test "zgraphy hybrid retrieval exposes keyword vector and graph contributions" {
     var evidence = try zstd.Testing.TestContext.initFromProject(std.testing.allocator, std.testing.io, std.Io.Dir.cwd(), .{
         .project = "zgraphy",

@@ -62,7 +62,39 @@ pub fn queryAlloc(
     defer allocator.free(term_scores);
     @memset(keyword, 0);
     @memset(graph_scores, 0);
-    for (query_terms.items) |term| {
+    // Inverse document frequency. A term's document frequency is the number of
+    // distinct nodes in its posting list, and the postings already answer that:
+    // they are sorted ascending by node index, so counting distinct nodes is one
+    // linear pass with no allocation and no second index.
+    //
+    // Without this every query term carries identical weight, so a token present
+    // in every node counts for exactly as much as a rare identifier — which is
+    // ranking by word count rather than by relevance.
+    const idfs = try owned.slice(f32, allocator, query_terms.items.len);
+    defer allocator.free(idfs);
+    var idf_total: f32 = 0;
+    for (query_terms.items, idfs) |term, *idf| {
+        const postings = graph.lexicalPostings(term);
+        var document_frequency: usize = 0;
+        var last_index: usize = std.math.maxInt(usize);
+        for (postings) |posting| {
+            if (posting.node_index != last_index) {
+                document_frequency += 1;
+                last_index = posting.node_index;
+            }
+        }
+        // Smoothed. The textbook ln(N/df) is exactly zero for a term present in
+        // every node, which would make a query built only of common words score
+        // zero everywhere and return nothing at all.
+        idf.* = if (document_frequency == 0)
+            0
+        else
+            @log(1.0 + @as(f32, @floatFromInt(count)) / @as(f32, @floatFromInt(document_frequency)));
+        idf_total += idf.*;
+    }
+    if (idf_total <= 0) idf_total = 1;
+
+    for (query_terms.items, idfs) |term, idf| {
         @memset(term_scores, 0);
         for (graph.lexicalPostings(term)) |posting| {
             const field_weight: f32 = switch (posting.field) {
@@ -73,7 +105,7 @@ pub fn queryAlloc(
             const frequency_boost = @min(@as(f32, 1.2), 1.0 + 0.05 * @as(f32, @floatFromInt(posting.frequency - 1)));
             term_scores[posting.node_index] = @max(term_scores[posting.node_index], field_weight * frequency_boost);
         }
-        for (0..count) |index| keyword[index] += term_scores[index] / @as(f32, @floatFromInt(query_terms.items.len));
+        for (0..count) |index| keyword[index] += term_scores[index] * idf / idf_total;
     }
     var max_keyword: f32 = 0;
     var max_vector: f32 = 0;
