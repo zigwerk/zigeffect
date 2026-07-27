@@ -13,7 +13,7 @@ const Io = std.Io;
 const fatal = std.process.fatal;
 const testing = std.testing;
 const assert = std.debug.assert;
-const panic = std.debug.panic;
+const panicFmt = std.debug.panic;
 const fuzz_abi = std.Build.abi.fuzz;
 
 const ReceiptStatus = enum { passed, skipped, failed, pending };
@@ -76,6 +76,47 @@ pub const std_options: std.Options = .{
     .allow_stack_tracing = builtin.mode == .Debug,
 };
 
+/// Index of the test currently executing, so a panic can name the test that
+/// caused it instead of leaving the whole suite ambiguous.
+var running_index: ?u32 = null;
+var panic_publishing: bool = false;
+
+/// A panic aborts the process before either `.exit` arm reaches
+/// `publishSuiteReceipt`, so the receipt is never rewritten and the PREVIOUS
+/// run's file survives on disk still claiming `complete: true, passed: true`.
+/// `zigeffect test affected` and `project check --agent` both read that file,
+/// so a panicking suite reads green — precisely the failure this receipt format
+/// exists to make impossible.
+///
+/// Publish an honest receipt, then panic exactly as before. The panicking test
+/// is marked `failed` with `error_name = "panic"`, and anything the suite never
+/// reached stays `pending`. Either way `passed` is false and the accounting
+/// names the test that died, which is the whole point: a receipt that says
+/// "something went wrong somewhere" costs a reader the same turn as no receipt.
+///
+/// Deliberately no causal store walk and no new allocator: the process is
+/// already broken, and reading its state here would turn one failure into two.
+pub const panic = std.debug.FullPanic(publishThenPanic);
+
+fn publishThenPanic(msg: []const u8, first_trace_addr: ?usize) noreturn {
+    @branchHint(.cold);
+    if (!panic_publishing) {
+        panic_publishing = true; // A panic raised while publishing must not recurse.
+        // Before marking anything: the results array does not exist until this
+        // runs, and a process that panics before `.query_test_metadata` has none.
+        // Marking first silently did nothing and left the culprit as `pending`.
+        initializeResults();
+        if (running_index) |index| {
+            if (index < suite_results.len) {
+                suite_results[index].status = .failed;
+                suite_results[index].error_name = "panic";
+            }
+        }
+        publishSuiteReceipt() catch {};
+    }
+    std.debug.defaultPanic(msg, first_trace_addr);
+}
+
 var log_err_count: usize = 0;
 var fba: std.heap.FixedBufferAllocator = .init(&fba_buffer);
 var fba_buffer: [8192]u8 = undefined;
@@ -110,11 +151,11 @@ pub fn main(init: std.process.Init.Minimal) void {
     }
 
     if (need_simple) {
-        return mainSimple() catch |err| panic("test failure: {t}", .{err});
+        return mainSimple() catch |err| panicFmt("test failure: {t}", .{err});
     }
 
     configureSuite(init);
-    const args = init.args.toSlice(fba.allocator()) catch |err| panic("unable to parse command line args: {t}", .{err});
+    const args = init.args.toSlice(fba.allocator()) catch |err| panicFmt("unable to parse command line args: {t}", .{err});
 
     var listen = false;
     var opt_cache_dir: ?[]const u8 = null;
@@ -128,7 +169,7 @@ pub fn main(init: std.process.Init.Minimal) void {
         } else if (std.mem.startsWith(u8, arg, "--cache-dir")) {
             opt_cache_dir = arg["--cache-dir=".len..];
         } else {
-            panic("unrecognized command line argument: {s}", .{arg});
+            panicFmt("unrecognized command line argument: {s}", .{arg});
         }
     }
 
@@ -138,7 +179,7 @@ pub fn main(init: std.process.Init.Minimal) void {
     }
 
     if (listen) {
-        return mainServer(init) catch |err| panic("internal test runner failure: {t}", .{err});
+        return mainServer(init) catch |err| panicFmt("internal test runner failure: {t}", .{err});
     } else {
         return mainTerminal(init);
     }
@@ -214,6 +255,8 @@ fn mainServer(init: std.process.Init.Minimal) !void {
 
                 const TestResults = std.zig.Server.Message.TestResults;
                 var error_name: ?[]const u8 = null;
+                running_index = index;
+                defer running_index = null;
                 const status: TestResults.Status = if (test_fn.func()) |v| s: {
                     v;
                     break :s .pass;
@@ -321,7 +364,7 @@ fn mainServer(init: std.process.Init.Minimal) !void {
                                 break;
                             }
                         } else {
-                            panic("fuzz test {s} no longer exists", .{name});
+                            panicFmt("fuzz test {s} no longer exists", .{name});
                         }
 
                         if (main_instance) {
@@ -385,6 +428,8 @@ fn mainTerminal(init: std.process.Init.Minimal) void {
         log_err_count = 0;
         var result_status: ReceiptStatus = .passed;
         var error_name: ?[]const u8 = null;
+        running_index = @intCast(i);
+        defer running_index = null;
         if (test_fn.func()) |_| {
             ok_count += 1;
             test_node.end();
@@ -481,6 +526,14 @@ fn publishSuiteReceipt() !void {
     initializeResults();
     const ended_ms = Io.Clock.real.now(runner_threaded_io).toMilliseconds();
     const counts = countResults();
+    // A process that executed nothing has nothing to report. After a test
+    // crashes, the build runner starts the binary again; that fresh process
+    // queries metadata, runs no test, and would overwrite the crashed
+    // process's honest receipt with an all-pending one. Last writer wins, and
+    // the last writer is the one that knows least.
+    //
+    // A panicking process always writes — it is the one carrying the news.
+    if (!panic_publishing and counts.discovered > 0 and counts.executed == 0) return;
     const complete = counts.executed == counts.discovered and counts.pending == 0;
     const passed = complete and counts.failed == 0 and counts.log_errors == 0 and counts.leaks == 0;
     const receipt = ReceiptWire{
@@ -643,7 +696,7 @@ var fuzz_runner: if (builtin.fuzz) struct {
         @disableInstrumentation();
 
         fuzz_runner.server.serveU32Message(.fuzz_test_change, i) catch |e| switch (e) {
-            error.WriteFailed => panic("failed to write to stdout: {t}", .{stdout_writer.err.?}),
+            error.WriteFailed => panicFmt("failed to write to stdout: {t}", .{stdout_writer.err.?}),
         };
 
         testing.allocator_instance = .{};
@@ -674,7 +727,7 @@ var fuzz_runner: if (builtin.fuzz) struct {
         @disableInstrumentation();
         const bytes = bytes_slice.toSlice();
         fuzz_runner.server.serveBroadcastFuzzInputMessage(test_i, bytes) catch |e| switch (e) {
-            error.WriteFailed => panic("failed to write to stdout: {t}", .{stdout_writer.err.?}),
+            error.WriteFailed => panicFmt("failed to write to stdout: {t}", .{stdout_writer.err.?}),
         };
     }
 
@@ -707,7 +760,7 @@ var fuzz_runner: if (builtin.fuzz) struct {
             error.Canceled => return error.Canceled,
             error.ReadFailed => {
                 if (stdin_reader.err.? == error.Canceled) return error.Canceled;
-                panic("failed to read from stdin: {t}", .{stdin_reader.err.?});
+                panicFmt("failed to read from stdin: {t}", .{stdin_reader.err.?});
             },
             error.EndOfStream => @panic("unexpected end of stdin"),
         }
@@ -721,7 +774,7 @@ var fuzz_runner: if (builtin.fuzz) struct {
         while (true) {
             const hdr = try server.receiveMessage();
             if (hdr.tag != .new_fuzz_input) {
-                panic("unexpected message: {x}\n", .{@intFromEnum(hdr.tag)});
+                panicFmt("unexpected message: {x}\n", .{@intFromEnum(hdr.tag)});
             }
             const test_i = try server.receiveBody_u32();
             const input_len = hdr.bytes_len - 4;
