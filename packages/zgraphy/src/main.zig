@@ -829,7 +829,26 @@ fn runBenchmarkWorkload(
     const fixture_id = command_line.positional(0) orelse return error.MissingBenchmarkFixture;
     const workload_name = command_line.positional(1) orelse return error.MissingBenchmarkWorkload;
     const workload = parseWorkload(workload_name) orelse return error.InvalidBenchmarkWorkload;
-    if (workload == .bounded_query) return error.UnsupportedBenchmarkWorkload;
+    // one_file_modify, rename and delete name incremental workloads and this
+    // function mutates nothing: the timed region below is a full
+    // Indexer.buildRepository for every variant, so all four would report the
+    // same cold-build number under four different labels. Measuring them would
+    // be worse than not measuring them, because the output looks like a result.
+    //
+    // They also cannot be fixed here by adding mutations alone. buildRepository
+    // with default options runs with extraction_cache_options disabled
+    // (extraction_cache.zig defaults `enabled` to false), so a rebuild through
+    // this path is a full reparse whatever changed. A real incremental
+    // measurement has to drive Operations.updateManaged against a mutated
+    // working copy, which is a different harness.
+    //
+    // Refused by name until that exists, following bounded_query's precedent.
+    // Measured manually in the meantime and recorded in the master roadmap:
+    // on 173 files, cold 3,148ms, one-file edit 64ms, unchanged rebuild ~2,000ms.
+    switch (workload) {
+        .bounded_query, .one_file_modify, .rename, .delete => return error.UnsupportedBenchmarkWorkload,
+        .cold_build, .warm_unchanged_build => {},
+    }
     const fixture = zgraphy.Benchmark.findFixture(corpus, fixture_id) orelse return error.UnknownBenchmarkFixture;
     const fixture_root = command_line.positional(2) orelse fixture.scan_root;
 
