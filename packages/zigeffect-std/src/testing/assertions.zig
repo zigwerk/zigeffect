@@ -14,6 +14,12 @@ pub const EventPattern = struct {
     detail_contains: ?[]const u8 = null,
 };
 
+/// How many findings `noFindings` names before it summarises the rest. Every
+/// finding is still cited by id; only the rendered text is bounded, because a
+/// run that produced fifty of them has one underlying cause and printing all
+/// fifty costs the reader more than it tells them.
+const rendered_finding_limit = 8;
+
 pub const Metadata = struct {
     id: []const u8,
     label: []const u8,
@@ -222,12 +228,37 @@ pub const Recorder = struct {
         try self.record(metadata, false, @tagName(expected), "missing", "causal finding not found", &.{});
     }
 
+    /// Assert the run produced no causal safety findings.
+    ///
+    /// On failure this reports which findings, not how many. The kinds and
+    /// labels are already derived and were previously freed one line later,
+    /// leaving the reader to re-query the graph for a fact the assertion had
+    /// in hand. The cited event ids travel into the receipt, so the claim
+    /// outlives the store that produced it.
     pub fn noFindings(self: Recorder, metadata: Metadata) !void {
         var findings = try self.context.causal_store.findings(self.context.allocator);
         defer findings.deinit();
-        const actual = try std.fmt.allocPrint(self.context.allocator, "{d} findings", .{findings.items.len});
-        defer self.context.allocator.free(actual);
-        try self.record(metadata, findings.items.len == 0, "0 findings", actual, "runtime causal safety findings", &.{});
+        if (findings.items.len == 0) {
+            try self.record(metadata, true, "0 findings", "0 findings", "runtime causal safety findings", &.{});
+            return;
+        }
+
+        var ids = std.ArrayList(u64).empty;
+        defer ids.deinit(self.context.allocator);
+        var actual = std.ArrayList(u8).empty;
+        defer actual.deinit(self.context.allocator);
+        try actual.print(self.context.allocator, "{d} findings: ", .{findings.items.len});
+        for (findings.items, 0..) |item, position| {
+            try ids.append(self.context.allocator, item.event_id);
+            if (position >= rendered_finding_limit) continue;
+            if (position != 0) try actual.appendSlice(self.context.allocator, "; ");
+            try actual.print(self.context.allocator, "{s}", .{@tagName(item.kind)});
+            if (item.label.len != 0) try actual.print(self.context.allocator, " {s}", .{item.label});
+        }
+        if (findings.items.len > rendered_finding_limit) {
+            try actual.print(self.context.allocator, "; +{d} more", .{findings.items.len - rendered_finding_limit});
+        }
+        try self.record(metadata, false, "0 findings", actual.items, "runtime causal safety findings", ids.items);
     }
 
     pub fn noPendingFibers(self: Recorder, metadata: Metadata) !void {
@@ -392,13 +423,34 @@ pub const Recorder = struct {
     }
 };
 
-pub fn renderHumanAlloc(allocator: std.mem.Allocator, assertions: []const Contract.AssertionResult) ![]u8 {
+/// Render the failed assertions in `assertions`, and nothing else, for whoever
+/// is reading a failing test.
+///
+/// Passing assertions are omitted on purpose. A scenario routinely records
+/// dozens, and at failure time every one of them is context spent to report
+/// that nothing happened. An all-passing slice therefore renders empty, so a
+/// caller can hand the result straight to an output stream without first
+/// deciding whether there is anything to say.
+///
+/// `source` is emitted whenever the assertion carries one: the file and line
+/// are the whole point, and an assertion identifier alone still leaves the
+/// reader grepping for where it lives.
+pub fn renderFailuresAlloc(allocator: std.mem.Allocator, assertions: []const Contract.AssertionResult) ![]u8 {
     var output = std.ArrayList(u8).empty;
     errdefer output.deinit(allocator);
     for (assertions) |assertion| {
-        try output.print(allocator, "[{s}] {s} ({s})\n", .{ @tagName(assertion.status), assertion.label, assertion.id });
-        if (assertion.status == .failed) {
-            try output.print(allocator, "  expected: {s}\n  actual: {s}\n  repair: {s}\n", .{ assertion.expected, assertion.actual, assertion.repair_hint });
+        if (assertion.status != .failed) continue;
+        try output.print(allocator, "[failed] {s} ({s})\n", .{ assertion.label, assertion.id });
+        if (assertion.source.path.len != 0) {
+            try output.print(allocator, "  at       {s}:{d}:{d}\n", .{
+                assertion.source.path,
+                assertion.source.line,
+                assertion.source.column,
+            });
+        }
+        try output.print(allocator, "  expected {s}\n  actual   {s}\n", .{ assertion.expected, assertion.actual });
+        if (assertion.repair_hint.len != 0) {
+            try output.print(allocator, "  repair   {s}\n", .{assertion.repair_hint});
         }
     }
     return output.toOwnedSlice(allocator);
@@ -492,6 +544,41 @@ test "assertions record pass and failure before returning" {
     try std.testing.expectEqual(Contract.TestStatus.failed, receipt.status);
 }
 
+test "human render carries only failures and cites the source location" {
+    var ctx = try Context.TestContext.init(std.testing.allocator, .{ .project = "demo", .suite = "unit", .scenario = scenario() });
+    defer ctx.deinit();
+    const assertions = Recorder.init(&ctx);
+    try assertions.stringEqual(.{ .id = "equal", .label = "strings equal" }, "value", "value");
+    try std.testing.expectError(error.AssertionFailed, assertions.contains(.{
+        .id = "contains",
+        .label = "contains value",
+        .repair_hint = "emit the missing field",
+        .source = .{ .id = "case", .path = "packages/zgraphy/test/all_test.zig", .line = 961, .column = 5 },
+    }, "abc", "xyz"));
+
+    const text = try renderFailuresAlloc(std.testing.allocator, ctx.assertions.items);
+    defer std.testing.allocator.free(text);
+
+    // Everything needed to act on the failure without opening another tool.
+    try std.testing.expect(std.mem.indexOf(u8, text, "contains value") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "emit the missing field") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "packages/zgraphy/test/all_test.zig:961:5") != null);
+
+    // A passing assertion is noise at failure time, and there are usually many.
+    try std.testing.expect(std.mem.indexOf(u8, text, "strings equal") == null);
+}
+
+test "human render of an all-passing run is empty" {
+    var ctx = try Context.TestContext.init(std.testing.allocator, .{ .project = "demo", .suite = "unit", .scenario = scenario() });
+    defer ctx.deinit();
+    const assertions = Recorder.init(&ctx);
+    try assertions.stringEqual(.{ .id = "equal", .label = "strings equal" }, "value", "value");
+
+    const text = try renderFailuresAlloc(std.testing.allocator, ctx.assertions.items);
+    defer std.testing.allocator.free(text);
+    try std.testing.expectEqual(@as(usize, 0), text.len);
+}
+
 test "semantic JSON ignores object key order and secret assertion redacts receipts" {
     var ctx = try Context.TestContext.init(std.testing.allocator, .{ .project = "demo", .suite = "unit", .scenario = scenario() });
     defer ctx.deinit();
@@ -530,6 +617,29 @@ test "causal matchers cite event ids and ordered subsequences" {
     try assertions.eventSequence(.{ .id = "sequence", .label = "run lifecycle" }, &.{ .run_started, .run_completed });
     try assertions.noFindings(.{ .id = "findings", .label = "no findings" });
     try std.testing.expectEqual(@as(usize, 1), ctx.assertions.items[0].causal_event_ids.len);
+}
+
+test "noFindings names what it found and cites the events" {
+    var ctx = try Context.TestContext.init(std.testing.allocator, .{ .project = "demo", .suite = "unit", .scenario = scenario() });
+    defer ctx.deinit();
+    // Acquired, never finalized, not inside an open scope: one finding.
+    _ = try ctx.causal_store.record(.{
+        .kind = .resource_acquired,
+        .label = "zgraphy.storage.WalHandle",
+        .status = "acquired",
+    });
+    const assertions = Recorder.init(&ctx);
+    try std.testing.expectError(
+        error.AssertionFailed,
+        assertions.noFindings(.{ .id = "findings", .label = "no findings" }),
+    );
+
+    const recorded = ctx.assertions.items[0];
+    // A bare count sends the reader back to the graph to ask what it already knew.
+    try std.testing.expect(std.mem.indexOf(u8, recorded.actual, "resource_acquired_without_finalization") != null);
+    try std.testing.expect(std.mem.indexOf(u8, recorded.actual, "zgraphy.storage.WalHandle") != null);
+    // Cited, so the claim survives into the receipt rather than dying with the store.
+    try std.testing.expectEqual(@as(usize, 1), recorded.causal_event_ids.len);
 }
 
 const AssertionApplicationService = fx.kernel.Service("testing/AssertionApplicationService", struct {
