@@ -1260,6 +1260,51 @@ test "zgraphy graph index round-trips facts and refuses a mismatched source" {
     );
 }
 
+test "zgraphy blast radius walks against the edges and stops at hubs" {
+    var graph = try zgraphy.RepositoryGraph.init(std.testing.allocator, .{});
+    defer graph.deinit();
+
+    // leaf <- mid <- top : changing leaf affects mid, then top.
+    const leaf = try graph.addSearchableNode(.symbol, "leaf", "src/leaf.zig", 1, "leaf");
+    const mid = try graph.addSearchableNode(.symbol, "mid", "src/mid.zig", 1, "mid");
+    const top = try graph.addSearchableNode(.symbol, "top", "src/top.zig", 1, "top");
+    const callee = try graph.addSearchableNode(.symbol, "callee", "src/callee.zig", 1, "callee");
+    try graph.addEdge(.{ .from = mid, .to = leaf, .relation = .calls, .provenance = .extracted });
+    try graph.addEdge(.{ .from = top, .to = mid, .relation = .calls, .provenance = .extracted });
+    // leaf calls callee: downstream, so it must NOT appear in leaf's blast radius.
+    try graph.addEdge(.{ .from = leaf, .to = callee, .relation = .calls, .provenance = .extracted });
+
+    var impact = try graph.impactAlloc(std.testing.allocator, leaf, 4, 32, 50);
+    defer impact.deinit();
+
+    try std.testing.expectEqual(@as(usize, 2), impact.node_ids.len);
+    try std.testing.expectEqual(mid, impact.node_ids[0]);
+    try std.testing.expectEqual(@as(u8, 1), impact.hops[0]);
+    try std.testing.expectEqual(top, impact.node_ids[1]);
+    try std.testing.expectEqual(@as(u8, 2), impact.hops[1]);
+    try std.testing.expect(!impact.truncated);
+    // Direction matters: what leaf calls is not affected by changing leaf.
+    for (impact.node_ids) |id| try std.testing.expect(id != callee);
+
+    // A hub is reported where it is reached and is not a route onward.
+    var hub_graph = try zgraphy.RepositoryGraph.init(std.testing.allocator, .{});
+    defer hub_graph.deinit();
+    const target = try hub_graph.addSearchableNode(.symbol, "target", "src/t.zig", 1, "target");
+    const hub = try hub_graph.addSearchableNode(.file, "big.zig", "src/big.zig", 1, "big file");
+    try hub_graph.addEdge(.{ .from = hub, .to = target, .relation = .contains, .provenance = .extracted });
+    for (0..60) |index| {
+        var name: [32]u8 = undefined;
+        const label = try std.fmt.bufPrint(&name, "Other{d}", .{index});
+        const other = try hub_graph.addSearchableNode(.symbol, label, "src/big.zig", @intCast(index + 2), "other");
+        try hub_graph.addEdge(.{ .from = other, .to = hub, .relation = .declares, .provenance = .extracted });
+    }
+    var hub_impact = try hub_graph.impactAlloc(std.testing.allocator, target, 4, 128, 50);
+    defer hub_impact.deinit();
+    // The hub itself is in the radius; its 60 dependants are not reached through it.
+    try std.testing.expectEqual(@as(usize, 1), hub_impact.node_ids.len);
+    try std.testing.expectEqual(hub, hub_impact.node_ids[0]);
+}
+
 test "zgraphy does not let a hub donate its score to everything it touches" {
     var graph = try zgraphy.RepositoryGraph.init(std.testing.allocator, .{});
     defer graph.deinit();

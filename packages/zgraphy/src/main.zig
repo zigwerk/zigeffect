@@ -1039,6 +1039,9 @@ fn runQuery(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, command_
     // Default 4 per direction: enough to see what a symbol calls and who calls
     // it, without turning a result into its neighbourhood.
     const neighbour_limit: usize = try numericOptionOf(command_line, "edges", 4, 0, 64);
+    // Off by default: blast radius is the expensive question and the one an
+    // agent asks deliberately, not the one it wants attached to every row.
+    const impact_hops: u8 = @intCast(try numericOptionOf(command_line, "impact", 0, 0, 8));
     const budget_chars = budget_tokens * 3;
     var loaded = try openGraph(allocator, io, root);
     defer loaded.deinit();
@@ -1097,6 +1100,9 @@ fn runQuery(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, command_
         }
         if (neighbour_limit > 0) {
             spent_chars += writeNeighbours(io, allocator, &loaded.graph, node.id, neighbour_limit) catch 0;
+        }
+        if (impact_hops > 0) {
+            spent_chars += writeImpact(io, allocator, &loaded.graph, node.id, impact_hops) catch 0;
         }
     }
     // Say it last, where a reader who skimmed the rows still sees it. A ranking
@@ -1206,6 +1212,43 @@ fn writeNeighbours(
             written += other.label.len + other.path.len + 24;
             shown += 1;
         }
+    }
+    return written;
+}
+
+/// Write what depends on `node_id` — the answer to "what breaks if I change
+/// this", which is the question an agent asks before editing.
+fn writeImpact(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    graph: *const zgraphy.RepositoryGraph,
+    node_id: u64,
+    hops: u8,
+) !usize {
+    var impact = graph.impactAlloc(allocator, node_id, hops, 24, 50) catch return 0;
+    defer impact.deinit();
+    if (impact.node_ids.len == 0) {
+        try writeText(io, allocator, "      impact: nothing depends on this within {d} hop(s)\n", .{hops});
+        return 48;
+    }
+    var written: usize = 0;
+    try writeText(io, allocator, "      impact: {d} node(s) within {d} hop(s){s}\n", .{
+        impact.node_ids.len,
+        hops,
+        if (impact.truncated) " (truncated — raise --impact or narrow the query)" else "",
+    });
+    for (impact.node_ids, impact.hops) |id, hop| {
+        const other = graph.findNode(id) orelse continue;
+        var label: zgraphy.Sanitize.Buffer = undefined;
+        var path: zgraphy.Sanitize.Buffer = undefined;
+        try writeText(io, allocator, "        {d}: {s} [{s}] {s}:{d}\n", .{
+            hop,
+            zgraphy.Sanitize.clean(&label, other.label),
+            @tagName(other.kind),
+            zgraphy.Sanitize.clean(&path, other.path),
+            other.line,
+        });
+        written += other.label.len + other.path.len + 24;
     }
     return written;
 }

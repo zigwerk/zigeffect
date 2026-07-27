@@ -25,6 +25,7 @@ const common_options = [_]zstd.Cli.OptionSpec{
     .{ .name = "correctness" },
     .{ .name = "budget", .kind = .integer },
     .{ .name = "edges", .kind = .integer },
+    .{ .name = "impact", .kind = .integer },
     .{ .name = "source", .kind = .integer },
     .{ .name = "debounce-ms", .kind = .integer },
     .{ .name = "graphify-environment" },

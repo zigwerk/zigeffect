@@ -618,6 +618,91 @@ pub const RepositoryGraph = struct {
         });
     }
 
+    pub const Impact = struct {
+        allocator: std.mem.Allocator,
+        node_ids: []u64,
+        hops: []u8,
+        /// True when the walk stopped on a bound rather than on exhaustion. A
+        /// partial blast radius read as a complete one is the answer that gets
+        /// something shipped broken, so it is reported rather than implied.
+        truncated: bool,
+
+        pub fn deinit(self: *Impact) void {
+            self.allocator.free(self.node_ids);
+            self.allocator.free(self.hops);
+        }
+    };
+
+    /// What depends on `from` — the nodes that reach it, to `max_hops`.
+    ///
+    /// Blast radius runs against the edges, not along them: changing a symbol
+    /// affects its callers, not what it calls. So this walks INCOMING edges.
+    ///
+    /// Hubs are terminal here for the same reason they do not donate score. A
+    /// node with 148 incident edges is a file or an application, and expanding
+    /// through one turns "what breaks if I change this" into "the repository".
+    /// It is still reported at the hop where it was reached; it is just not a
+    /// route to everything else.
+    pub fn impactAlloc(
+        self: *const RepositoryGraph,
+        allocator: std.mem.Allocator,
+        from: u64,
+        max_hops: u8,
+        max_nodes: usize,
+        hub_degree: usize,
+    ) !Impact {
+        if (self.findNode(from) == null) return error.NodeNotFound;
+        if (max_hops == 0 or max_nodes == 0) return error.InvalidHopLimit;
+
+        var seen: std.AutoHashMapUnmanaged(u64, void) = .empty;
+        defer seen.deinit(allocator);
+        var ids: std.ArrayList(u64) = .empty;
+        errdefer ids.deinit(allocator);
+        var hops: std.ArrayList(u8) = .empty;
+        errdefer hops.deinit(allocator);
+
+        try seen.put(allocator, from, {});
+        var frontier: std.ArrayList(u64) = .empty;
+        defer frontier.deinit(allocator);
+        try frontier.append(allocator, from);
+
+        var truncated = false;
+        var depth: u8 = 0;
+        while (depth < max_hops and frontier.items.len > 0) : (depth += 1) {
+            var next: std.ArrayList(u64) = .empty;
+            defer next.deinit(allocator);
+            for (frontier.items) |node_id| {
+                const incoming = self.incomingEdges(node_id);
+                // Terminal, not excluded: it was already recorded when reached.
+                if (node_id != from and incoming.len + self.outgoingEdges(node_id).len >= hub_degree) continue;
+                for (incoming) |edge_index| {
+                    const edge = self.edgeAt(edge_index) orelse continue;
+                    if (seen.contains(edge.from)) continue;
+                    if (ids.items.len >= max_nodes) {
+                        truncated = true;
+                        break;
+                    }
+                    try seen.put(allocator, edge.from, {});
+                    try ids.append(allocator, edge.from);
+                    try hops.append(allocator, depth + 1);
+                    try next.append(allocator, edge.from);
+                }
+                if (truncated) break;
+            }
+            if (truncated) break;
+            frontier.clearRetainingCapacity();
+            try frontier.appendSlice(allocator, next.items);
+        }
+        if (!truncated and depth == max_hops and frontier.items.len > 0) truncated = true;
+
+        return .{
+            .allocator = allocator,
+            .node_ids = try ids.toOwnedSlice(allocator),
+            .hops = try hops.toOwnedSlice(allocator),
+            .truncated = truncated,
+        };
+    }
+
     pub fn shortestPathAlloc(
         self: *const RepositoryGraph,
         allocator: std.mem.Allocator,
