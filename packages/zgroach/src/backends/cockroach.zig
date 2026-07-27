@@ -38,11 +38,9 @@ pub const capabilities = Backend.Capabilities{
     // to_tsvector @@ plainto_tsquery. A capability is a claim about what this
     // code does, not about what Postgres could do.
     .text_search = true,
-    // Still false. A distance operator belongs in ORDER BY and the plan IR has
-    // no ordering clause, so there is no threshold for `.similar` to compare
-    // against and nothing honest to emit. It becomes true when the IR grows a
-    // rank clause, not before.
-    .vector_search = false,
+    // True, and backed by emission: a `.similar` predicate compiles to an
+    // ORDER BY over pgvector's `<=>` with the probe bound as a parameter.
+    .vector_search = true,
     .time_travel = true,
     .transactions = true,
 };
@@ -63,6 +61,10 @@ pub const Compiled = struct {
 pub const Parameter = union(enum) {
     text: []const u8,
     id: u64,
+    /// A probe for a distance comparison. Bound like any other parameter rather
+    /// than formatted into the statement, so a caller cannot smuggle SQL through
+    /// a float array and the plan cache sees one statement.
+    vector: []const f32,
 };
 
 /// Lower a plan to SQL against a schema.
@@ -165,6 +167,8 @@ pub fn compile(
         }
     }
 
+    try appendSimilarityOrder(allocator, &sql, &parameters, schema, node_name, plan);
+
     try sql.print(allocator, "\nLIMIT ${d};", .{parameters.items.len + 1});
     try parameters.append(allocator, .{ .id = plan.limit });
 
@@ -236,6 +240,38 @@ fn compileRecursive(
     return .{ .sql = try sql.toOwnedSlice(allocator), .parameters = owned_parameters };
 }
 
+/// Order by distance from each `.similar` probe.
+///
+/// `<=>` is pgvector's cosine-distance operator: smaller is closer, so ascending
+/// order puts the nearest first and no explicit direction is needed. Emitted
+/// after the filters because ordering a filtered set is the cheap way round, and
+/// before LIMIT because the whole point is which rows survive it.
+fn appendSimilarityOrder(
+    allocator: std.mem.Allocator,
+    sql: *std.ArrayList(u8),
+    parameters: *std.ArrayList(Parameter),
+    schema: Schema.Schema,
+    node_name: []const u8,
+    plan: Plan.Plan,
+) !void {
+    const predicates = switch (plan.from) {
+        .matching => |values| values,
+        .event => return,
+    };
+    var wrote = false;
+    for (predicates) |predicate| {
+        const probe = switch (predicate.match) {
+            .similar => |value| value,
+            else => continue,
+        };
+        const field = try schema.nodeField(node_name, predicate.field);
+        try sql.appendSlice(allocator, if (wrote) ", " else "\nORDER BY ");
+        wrote = true;
+        try sql.print(allocator, "n0.\"{s}\" <=> ${d}", .{ field.column, parameters.items.len + 1 });
+        try parameters.append(allocator, .{ .vector = probe });
+    }
+}
+
 fn firstRelation(schema: Schema.Schema, node_name: []const u8) !Schema.Relation {
     for (schema.relations) |relation| {
         if (std.mem.eql(u8, relation.from_node, node_name)) return relation;
@@ -284,11 +320,10 @@ fn appendPredicateInto(
     };
     if (!accepts) return error.FieldKindMismatch;
 
-    // A distance operator belongs in ORDER BY, and the plan IR has no ordering
-    // clause, so a `.similar` predicate has no threshold to compare against and
-    // nothing honest to emit. Refused here as well as by capability, so the
-    // reason is visible at the point it matters.
-    if (predicate.match == .similar) return error.VectorSearchNotCompiled;
+    // Similarity orders, it does not filter: there is no threshold in the plan
+    // to be below, so it contributes an ORDER BY rather than a WHERE term and is
+    // emitted after the filters instead of among them.
+    if (predicate.match == .similar) return;
 
     try sql.appendSlice(allocator, if (wrote_where.*) subsequent else first);
     wrote_where.* = true;
@@ -352,12 +387,33 @@ test "a lexical match compiles to full-text SQL, and a vector one is refused" {
     defer compiled_negated.deinit(std.testing.allocator);
     try std.testing.expect(std.mem.indexOf(u8, compiled_negated.sql, "NOT (to_tsvector") != null);
 
-    // A distance operator belongs in ORDER BY and the IR has no ordering clause,
-    // so this is refused at compile time rather than emitted as something that
-    // looks like a filter and is not.
+    // Similarity compiles to an ORDER BY over pgvector's cosine-distance
+    // operator. Smaller is closer, so ascending is nearest-first and no explicit
+    // direction is needed — an added DESC here would silently return the least
+    // similar rows.
     const probe = [_]f32{ 0.1, 0.2 };
     const similar = try Plan.Builder.matching(&.{.{ .field = "profile", .match = .{ .similar = &probe } }}).build();
-    try std.testing.expectError(error.VectorSearchNotCompiled, compile(std.testing.allocator, commerce, "User", similar));
+    var vector_sql = try compile(std.testing.allocator, commerce, "User", similar);
+    defer vector_sql.deinit(std.testing.allocator);
+    try std.testing.expect(std.mem.indexOf(u8, vector_sql.sql, "ORDER BY n0.\"embedding\" <=> $1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, vector_sql.sql, "DESC") == null);
+    // The probe is bound, never formatted in: a float array is still caller
+    // input, and one statement shape keeps the plan cache useful.
+    try std.testing.expectEqualSlices(f32, &probe, vector_sql.parameters[0].vector);
+
+    // Ordering is emitted after the filters and before LIMIT — ordering a
+    // filtered set rather than the table, and before the cut that decides which
+    // rows survive.
+    const hybrid = try Plan.Builder.matching(&.{
+        .{ .field = "bio", .match = .{ .lexical = "checkout" } },
+        .{ .field = "profile", .match = .{ .similar = &probe } },
+    }).build();
+    var hybrid_sql = try compile(std.testing.allocator, commerce, "User", hybrid);
+    defer hybrid_sql.deinit(std.testing.allocator);
+    const where_at = std.mem.indexOf(u8, hybrid_sql.sql, "WHERE").?;
+    const order_at = std.mem.indexOf(u8, hybrid_sql.sql, "ORDER BY").?;
+    const limit_at = std.mem.indexOf(u8, hybrid_sql.sql, "LIMIT").?;
+    try std.testing.expect(where_at < order_at and order_at < limit_at);
 }
 
 test "an anchored plan compiles to a parameterised statement" {
@@ -528,8 +584,9 @@ test "the connector declares what a relational store really can do" {
     // read as the connector's.
     // text_search is now backed by emission; vector_search is not, and both are
     // asserted so neither can drift without a deliberate edit.
+    // Both now backed by emission rather than by what Postgres could do.
     try std.testing.expect(capabilities.text_search);
-    try std.testing.expect(!capabilities.vector_search);
+    try std.testing.expect(capabilities.vector_search);
     try std.testing.expect(capabilities.transactions);
     try std.testing.expect(capabilities.time_travel);
 }
