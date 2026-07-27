@@ -83,7 +83,18 @@ pub const Error = error{
 /// win on strings and a large one on paths.
 const Interner = struct {
     bytes: std.ArrayList(u8) = .empty,
-    offsets: std.StringHashMapUnmanaged(u32) = .empty,
+    /// Keyed by content HASH, not by the string.
+    ///
+    /// The obvious implementation keys a StringHashMap by a slice into `bytes`,
+    /// and it is wrong: `bytes` reallocates on append, so every insertion
+    /// dangles every key already stored, and the map corrupts itself the moment
+    /// it grows. That is not hypothetical — the causal graph's string table was
+    /// written that way earlier and took down seven test binaries with SIGABRT.
+    ///
+    /// A hash is stable across reallocation. Collisions are resolved by
+    /// comparing the candidate against the bytes actually stored, so a false
+    /// match costs a duplicate entry rather than a wrong offset.
+    offsets: std.AutoHashMapUnmanaged(u64, u32) = .empty,
     allocator: std.mem.Allocator,
 
     fn deinit(self: *Interner) void {
@@ -93,11 +104,17 @@ const Interner = struct {
 
     fn intern(self: *Interner, value: []const u8) !u32 {
         if (value.len == 0) return 0;
-        if (self.offsets.get(value)) |offset| return offset;
+        const key = std.hash.Wyhash.hash(0, value);
+        if (self.offsets.get(key)) |offset| {
+            const end = @as(usize, offset) + value.len;
+            if (end <= self.bytes.items.len and
+                std.mem.eql(u8, self.bytes.items[offset..end], value)) return offset;
+            // Hash collision on different content: store it separately rather
+            // than returning an offset that decodes to the wrong string.
+        }
         const offset: u32 = @intCast(self.bytes.items.len);
         try self.bytes.appendSlice(self.allocator, value);
-        // Key by the interned copy: the caller's slice may not outlive us.
-        try self.offsets.put(self.allocator, self.bytes.items[offset..][0..value.len], offset);
+        try self.offsets.put(self.allocator, key, offset);
         return offset;
     }
 };
