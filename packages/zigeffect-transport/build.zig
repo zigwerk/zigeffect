@@ -19,7 +19,16 @@ fn linkOpenSsl(module: *std.Build.Module, target: std.Build.ResolvedTarget) void
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
-    const optimize = b.standardOptimizeOption(.{});
+    // Nothing here is installed — every artifact this package builds is a test or
+    // test infrastructure — so the package default is the test default. A bare
+    // `zig build test` in Debug spends most of its time in the harness capturing
+    // ten stack frames per allocation. `-Doptimize` still works and still means
+    // what it says; `-Doptimize=Debug` restores the traces.
+    const optimize = b.option(
+        std.builtin.OptimizeMode,
+        "optimize",
+        "Optimize mode (default ReleaseSafe; this package installs nothing)",
+    ) orelse .ReleaseSafe;
     const zstd_dep = b.dependency("zigeffect_std", .{ .target = target, .optimize = optimize });
     const zstd = zstd_dep.module("zigeffect_std");
     const module = b.addModule("zigeffect_transport", .{
