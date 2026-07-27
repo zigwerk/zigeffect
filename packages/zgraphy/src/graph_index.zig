@@ -33,12 +33,24 @@ pub const Header = extern struct {
     node_count: u32,
     edge_count: u32,
     string_bytes: u32,
-    /// SHA-256 of the snapshot this was derived from. A mismatch means the
-    /// index describes a graph nobody asked for.
+    /// CRC32C of the snapshot bytes this was derived from.
+    ///
+    /// This is the check that lets an index replace *parsing* a snapshot without
+    /// also replacing the corruption detection that reads it. Verifying costs a
+    /// read and a checksum — on a 10 MB snapshot roughly 5 ms and 1 ms — where
+    /// parsing costs ~400 ms. So the snapshot is still read and still known to be
+    /// intact; only the JSON parse is skipped.
+    ///
+    /// Without it an index answers happily while its snapshot is damaged, which
+    /// bypasses the recovery machinery and reports a health it did not verify.
+    source_crc: u32,
+    reserved: u32 = 0,
+    /// Fingerprint of the graph this was derived from: proves the index belongs
+    /// to the generation being asked for, which `source_crc` does not.
     source_digest: [32]u8,
 
     comptime {
-        std.debug.assert(@sizeOf(Header) == 56);
+        std.debug.assert(@sizeOf(Header) == 64);
     }
 };
 
@@ -124,6 +136,7 @@ pub fn encodeAlloc(
     allocator: std.mem.Allocator,
     graph: *const model.RepositoryGraph,
     source_digest: [32]u8,
+    source_crc: u32,
 ) ![]u8 {
     var interner = Interner{ .allocator = allocator };
     defer interner.deinit();
@@ -162,6 +175,7 @@ pub fn encodeAlloc(
         .node_count = @intCast(nodes.len),
         .edge_count = @intCast(edges.len),
         .string_bytes = @intCast(interner.bytes.items.len),
+        .source_crc = source_crc,
         .source_digest = source_digest,
     };
 
@@ -193,6 +207,7 @@ pub fn decode(
     allocator: std.mem.Allocator,
     bytes: []const u8,
     expected_digest: [32]u8,
+    expected_crc: u32,
     options: model.Options,
 ) !model.RepositoryGraph {
     if (bytes.len < @sizeOf(Header)) return Error.IndexUnusable;
@@ -200,6 +215,7 @@ pub fn decode(
     @memcpy(std.mem.asBytes(&header), bytes[0..@sizeOf(Header)]);
     if (header.magic != magic or header.version != version) return Error.IndexUnusable;
     if (!std.mem.eql(u8, &header.source_digest, &expected_digest)) return Error.IndexUnusable;
+    if (header.source_crc != expected_crc) return Error.IndexUnusable;
 
     const nodes_bytes = @as(u64, header.node_count) * @sizeOf(NodeRecord);
     const edges_bytes = @as(u64, header.edge_count) * @sizeOf(EdgeRecord);

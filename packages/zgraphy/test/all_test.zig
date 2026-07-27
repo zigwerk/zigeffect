@@ -1217,10 +1217,11 @@ test "zgraphy graph index round-trips facts and refuses a mismatched source" {
     try graph.addEdge(.{ .from = handler, .to = repository, .relation = .calls, .provenance = .extracted });
 
     const digest: [32]u8 = @splat(7);
-    const encoded = try zgraphy.GraphIndex.encodeAlloc(std.testing.allocator, &graph, digest);
+    const snapshot_crc: u32 = 0xdeadbeef;
+    const encoded = try zgraphy.GraphIndex.encodeAlloc(std.testing.allocator, &graph, digest, snapshot_crc);
     defer std.testing.allocator.free(encoded);
 
-    var restored = try zgraphy.GraphIndex.decode(std.testing.allocator, encoded, digest, .{});
+    var restored = try zgraphy.GraphIndex.decode(std.testing.allocator, encoded, digest, snapshot_crc, .{});
     defer restored.deinit();
 
     // The facts survive.
@@ -1243,12 +1244,19 @@ test "zgraphy graph index round-trips facts and refuses a mismatched source" {
     const other: [32]u8 = @splat(9);
     try std.testing.expectError(
         zgraphy.GraphIndex.Error.IndexUnusable,
-        zgraphy.GraphIndex.decode(std.testing.allocator, encoded, other, .{}),
+        zgraphy.GraphIndex.decode(std.testing.allocator, encoded, other, snapshot_crc, .{}),
     );
     // So must a truncated one.
     try std.testing.expectError(
         zgraphy.GraphIndex.Error.IndexUnusable,
-        zgraphy.GraphIndex.decode(std.testing.allocator, encoded[0 .. encoded.len - 9], digest, .{}),
+        zgraphy.GraphIndex.decode(std.testing.allocator, encoded[0 .. encoded.len - 9], digest, snapshot_crc, .{}),
+    );
+    // A snapshot that changed under the index must fail over, even when the
+    // index itself is intact and belongs to this generation. This is the check
+    // that keeps corruption detection working.
+    try std.testing.expectError(
+        zgraphy.GraphIndex.Error.IndexUnusable,
+        zgraphy.GraphIndex.decode(std.testing.allocator, encoded, digest, snapshot_crc +% 1, .{}),
     );
 }
 
