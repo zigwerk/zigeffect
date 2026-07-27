@@ -1209,6 +1209,29 @@ test "zgraphy renders no byte from an indexed repository that could steer a term
     try std.testing.expect(std.mem.indexOfScalar(u8, encoded, '\n') == null);
 }
 
+test "zgraphy scores candidates rather than the corpus" {
+    var graph = try zgraphy.RepositoryGraph.init(std.testing.allocator, .{});
+    defer graph.deinit();
+
+    // One node matches. The rest are unrelated and unconnected, so nothing can
+    // reach them through a term or through a neighbour.
+    _ = try graph.addSearchableNode(.symbol, "KerberosTicket", "src/kerberos.zig", 1, "kerberos ticket exchange");
+    for (0..64) |index| {
+        var name: [32]u8 = undefined;
+        const label = try std.fmt.bufPrint(&name, "Unrelated{d}", .{index});
+        _ = try graph.addSearchableNode(.symbol, label, "src/other.zig", 1, "nothing to do with it");
+    }
+
+    var results = try zgraphy.Search.queryAlloc(std.testing.allocator, &graph, "kerberos", .{ .limit = 5 });
+    defer results.deinit();
+
+    try std.testing.expectEqual(@as(usize, 65), results.corpus);
+    try std.testing.expect(results.items.len >= 1);
+    // The cosine used to run over every node in the graph. It now runs over the
+    // posting union plus one hop, so a selective query touches a small fraction.
+    try std.testing.expect(results.scanned < results.corpus / 4);
+}
+
 test "zgraphy retrieval weights a rare term above a common one" {
     var graph = try zgraphy.RepositoryGraph.init(std.testing.allocator, .{});
     defer graph.deinit();

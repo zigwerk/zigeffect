@@ -22,6 +22,12 @@ pub const Results = struct {
     allocator: std.mem.Allocator,
     items: []Result,
     embedder: []const u8 = nendb.embedder,
+    /// Nodes actually scored. The postings plus one hop, not the corpus — so
+    /// this reads far below `nodeCount()` on any selective query, and a reader
+    /// can tell a narrow answer from an exhaustive one.
+    scanned: usize = 0,
+    /// Nodes in the graph when the query ran, so `scanned` has a denominator.
+    corpus: usize = 0,
 
     pub fn deinit(self: *Results) void {
         self.allocator.free(self.items);
@@ -58,10 +64,11 @@ pub fn queryAlloc(
     defer allocator.free(base);
     const graph_scores = try owned.slice(f32, allocator, count);
     defer allocator.free(graph_scores);
-    const term_scores = try owned.slice(f32, allocator, count);
-    defer allocator.free(term_scores);
     @memset(keyword, 0);
+    @memset(vector, 0);
+    @memset(base, 0);
     @memset(graph_scores, 0);
+
     // Inverse document frequency. A term's document frequency is the number of
     // distinct nodes in its posting list, and the postings already answer that:
     // they are sorted ascending by node index, so counting distinct nodes is one
@@ -94,32 +101,83 @@ pub fn queryAlloc(
     }
     if (idf_total <= 0) idf_total = 1;
 
+    // The postings ARE the candidate generator. A node with no matching term and
+    // no matching neighbour cannot outrank one that has either, so scoring the
+    // whole corpus in order to discover that is work spent to learn nothing.
+    //
+    // This is also what demotes the vector from a generator over the corpus to a
+    // rescorer over the candidates, and that demotion is what keeps an
+    // approximate-nearest-neighbour index unnecessary rather than merely
+    // deferred: the cosine now runs over hundreds of nodes, not all of them.
+    const seen = try owned.slice(bool, allocator, count);
+    defer allocator.free(seen);
+    @memset(seen, false);
+    var candidates: std.ArrayList(u32) = .empty;
+    defer candidates.deinit(allocator);
+
     for (query_terms.items, idfs) |term, idf| {
-        @memset(term_scores, 0);
-        for (graph.lexicalPostings(term)) |posting| {
-            const field_weight: f32 = switch (posting.field) {
-                .label => 1.0,
-                .path => 0.8,
-                .search_text => 0.65,
-            };
-            const frequency_boost = @min(@as(f32, 1.2), 1.0 + 0.05 * @as(f32, @floatFromInt(posting.frequency - 1)));
-            term_scores[posting.node_index] = @max(term_scores[posting.node_index], field_weight * frequency_boost);
+        const postings = graph.lexicalPostings(term);
+        var cursor: usize = 0;
+        while (cursor < postings.len) {
+            // Postings for one term are sorted by node index, so every posting
+            // for a given node is contiguous. The best field wins without a
+            // dense per-term scratch array to scatter into and re-zero.
+            const node_index = postings[cursor].node_index;
+            var best: f32 = 0;
+            while (cursor < postings.len and postings[cursor].node_index == node_index) : (cursor += 1) {
+                const field_weight: f32 = switch (postings[cursor].field) {
+                    .label => 1.0,
+                    .path => 0.8,
+                    .search_text => 0.65,
+                };
+                const frequency_boost = @min(@as(f32, 1.2), 1.0 + 0.05 * @as(f32, @floatFromInt(postings[cursor].frequency - 1)));
+                best = @max(best, field_weight * frequency_boost);
+            }
+            keyword[node_index] += best * idf / idf_total;
+            if (!seen[node_index]) {
+                seen[node_index] = true;
+                try candidates.append(allocator, @intCast(node_index));
+            }
         }
-        for (0..count) |index| keyword[index] += term_scores[index] * idf / idf_total;
     }
+
+    // One hop out. The graph signal lets a node score through a matching
+    // neighbour, so a neighbour of a seed is a candidate even when it matched no
+    // term itself. Anything further than one hop cannot affect the score,
+    // because the propagation below reads `base` and never chains.
+    const seed_count = candidates.items.len;
+    for (0..seed_count) |position| {
+        const seed_index = candidates.items[position];
+        const node_id = graph.nodeAt(seed_index).id;
+        for (graph.outgoingEdges(node_id)) |edge_index| {
+            const edge = graph.edgeAt(edge_index) orelse continue;
+            const neighbor = graph.topology.findNodeIndex(edge.to) orelse continue;
+            if (seen[neighbor]) continue;
+            seen[neighbor] = true;
+            try candidates.append(allocator, @intCast(neighbor));
+        }
+        for (graph.incomingEdges(node_id)) |edge_index| {
+            const edge = graph.edgeAt(edge_index) orelse continue;
+            const neighbor = graph.topology.findNodeIndex(edge.from) orelse continue;
+            if (seen[neighbor]) continue;
+            seen[neighbor] = true;
+            try candidates.append(allocator, @intCast(neighbor));
+        }
+    }
+
     var max_keyword: f32 = 0;
     var max_vector: f32 = 0;
-    for (0..count) |index| {
+    for (candidates.items) |index| {
         vector[index] = @max(@as(f32, 0), nendb.cosine(&query_vector, graph.vectorAt(index)));
         max_keyword = @max(max_keyword, keyword[index]);
         max_vector = @max(max_vector, vector[index]);
     }
-    for (0..count) |index| {
+    for (candidates.items) |index| {
         if (max_keyword > 0) keyword[index] /= max_keyword;
         if (max_vector > 0) vector[index] /= max_vector;
         base[index] = 0.6 * keyword[index] + 0.4 * vector[index];
     }
-    for (0..count) |index| {
+    for (candidates.items) |index| {
         const node_id = graph.nodeAt(index).id;
         for (graph.outgoingEdges(node_id)) |edge_index| {
             const edge = graph.edgeAt(edge_index) orelse continue;
@@ -135,7 +193,7 @@ pub fn queryAlloc(
 
     var ranked: std.ArrayList(Result) = .empty;
     defer ranked.deinit(allocator);
-    for (0..count) |index| {
+    for (candidates.items) |index| {
         const score = (options.keyword_weight * keyword[index] +
             options.vector_weight * vector[index] +
             options.graph_weight * graph_scores[index]) / weight_sum;
@@ -155,5 +213,10 @@ pub fn queryAlloc(
         }
     }.lessThan);
     const result_count = @min(options.limit, ranked.items.len);
-    return .{ .allocator = allocator, .items = try owned.copy(Result, allocator, ranked.items[0..result_count]) };
+    return .{
+        .allocator = allocator,
+        .items = try owned.copy(Result, allocator, ranked.items[0..result_count]),
+        .scanned = candidates.items.len,
+        .corpus = count,
+    };
 }
