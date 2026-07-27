@@ -354,6 +354,13 @@ fn writeAtomicSlot(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir, pa
     defer if (open) file.close(io);
     defer dir.deleteFile(io, temporary) catch {};
     try file.writeStreamingAll(io, bytes);
+    // Before the rename, not after. writeStreamingAll returns once the bytes
+    // reach the page cache, and rename is atomic with respect to *the directory
+    // entry* only — so without this a power loss can leave the entry pointing at
+    // a file whose contents never reached disk. The snapshot would then be
+    // present, named correctly, and truncated or empty, which is the one failure
+    // mode an atomic write exists to prevent.
+    try file.sync(io);
     file.close(io);
     open = false;
     dir.rename(temporary, dir, path, io) catch |failure| switch (failure) {
