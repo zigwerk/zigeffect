@@ -1506,6 +1506,11 @@ const ResultView = struct {
     keyword_score: f32,
     vector_score: f32,
     graph_score: f32,
+    /// How many distinct query terms this result matched. Without it a consumer
+    /// can read the confidence verdict but not the evidence for it — the text
+    /// surface has carried this since the verdict existed and the JSON did not,
+    /// which is the workbench reading a poorer answer than the terminal.
+    matched_terms: u32,
 };
 
 fn resultView(graph: *const zgraphy.RepositoryGraph, result: zgraphy.Search.Result) ResultView {
@@ -1520,6 +1525,7 @@ fn resultView(graph: *const zgraphy.RepositoryGraph, result: zgraphy.Search.Resu
         .keyword_score = result.keyword_score,
         .vector_score = result.vector_score,
         .graph_score = result.graph_score,
+        .matched_terms = result.matched_terms,
     };
 }
 
