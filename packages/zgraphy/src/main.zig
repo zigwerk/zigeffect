@@ -1036,6 +1036,9 @@ fn runQuery(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, command_
     // Default 3: enough to see a signature and its first statements without
     // turning the answer into the file.
     const source_context: u32 = @intCast(try numericOptionOf(command_line, "source", 3, 0, 40));
+    // Default 4 per direction: enough to see what a symbol calls and who calls
+    // it, without turning a result into its neighbourhood.
+    const neighbour_limit: usize = try numericOptionOf(command_line, "edges", 4, 0, 64);
     const budget_chars = budget_tokens * 3;
     var loaded = try openGraph(allocator, io, root);
     defer loaded.deinit();
@@ -1091,6 +1094,9 @@ fn runQuery(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, command_
         });
         if (source_context > 0 and node.path.len > 0 and node.line > 0) {
             spent_chars += writeSourceWindow(io, allocator, root, node.path, node.line, source_context) catch 0;
+        }
+        if (neighbour_limit > 0) {
+            spent_chars += writeNeighbours(io, allocator, &loaded.graph, node.id, neighbour_limit) catch 0;
         }
     }
     // Say it last, where a reader who skimmed the rows still sees it. A ranking
@@ -1157,6 +1163,49 @@ fn writeSourceWindow(
         const marker: []const u8 = if (current == line) ">" else " ";
         try writeText(io, allocator, "    {s}{d: >5} {s}\n", .{ marker, current, zgraphy.Sanitize.clean(&buffer, text) });
         written += text.len + 8;
+    }
+    return written;
+}
+
+/// Write the edges incident to `node_id`, so the answer carries call flow rather
+/// than only the symbol.
+///
+/// Both adjacency lists answer in constant time, so this costs a bounded walk
+/// and no traversal. Bounded per direction because a hub has 148 neighbours and
+/// nobody asked for the file.
+fn writeNeighbours(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    graph: *const zgraphy.RepositoryGraph,
+    node_id: u64,
+    limit: usize,
+) !usize {
+    var written: usize = 0;
+    inline for (.{ true, false }) |outgoing| {
+        const edge_indexes = if (outgoing) graph.outgoingEdges(node_id) else graph.incomingEdges(node_id);
+        var shown: usize = 0;
+        for (edge_indexes) |edge_index| {
+            if (shown >= limit) {
+                try writeText(io, allocator, "      ... {d} more\n", .{edge_indexes.len - shown});
+                written += 20;
+                break;
+            }
+            const edge = graph.edgeAt(edge_index) orelse continue;
+            const other_id = if (outgoing) edge.to else edge.from;
+            const other = graph.findNode(other_id) orelse continue;
+            var label: zgraphy.Sanitize.Buffer = undefined;
+            var path: zgraphy.Sanitize.Buffer = undefined;
+            try writeText(io, allocator, "      {s} {s} {s} [{s}] {s}:{d}\n", .{
+                if (outgoing) "->" else "<-",
+                @tagName(edge.relation),
+                zgraphy.Sanitize.clean(&label, other.label),
+                @tagName(other.kind),
+                zgraphy.Sanitize.clean(&path, other.path),
+                other.line,
+            });
+            written += other.label.len + other.path.len + 24;
+            shown += 1;
+        }
     }
     return written;
 }
