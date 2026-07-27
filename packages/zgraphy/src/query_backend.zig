@@ -16,8 +16,9 @@
 //! frequency weighted by which field the term hit, which is what distinguishes
 //! two nodes that both contain every term.
 //!
-//! `vector_search` stays false: similarity is an ordering over a probe, and this
-//! connector has no way to receive one that the IR can express.
+//! It ranks by similarity too. `Match.similar` carries the probe the IR was
+//! missing, so a hybrid plan — narrow by term, order by distance — is one query
+//! against one store rather than two passes merged by the caller.
 
 const std = @import("std");
 const model = @import("model.zig");
@@ -26,12 +27,15 @@ const zgroach = @import("zgroach");
 
 /// What this connector can answer, and nothing more.
 ///
-/// `vector_search` is false even though the store holds an embedding per node:
-/// a similarity query needs a probe vector, and nothing in the plan carries one
-/// that this connector could compare against.
+/// `vector_search` is true and backed by computation: `Match.similar` carries
+/// the probe, the store holds an embedding per node, and the connector compares
+/// them. It is not true because the store *could* — the CockroachDB connector
+/// says false for exactly that reason, since its emitter cannot write a distance
+/// operator.
 pub const capabilities = zgroach.Backend.Capabilities{
     .predicates = true,
     .text_search = true,
+    .vector_search = true,
     .traversal = true,
     .reverse_traversal = true,
 };
@@ -94,6 +98,18 @@ pub const RepositoryBackend = struct {
                 }
                 score += idf * best;
             }
+        }
+        for (predicates) |predicate| {
+            const probe = switch (predicate.match) {
+                .similar => |value| value,
+                else => continue,
+            };
+            // A probe of the wrong width is a caller error, not a reason to
+            // guess: `cosine` returns 0 for mismatched lengths, so a 3-element
+            // probe against 64-dimension embeddings would score every node
+            // identically and look like a tie rather than a mistake.
+            if (probe.len != nendb.embedding_dimensions) continue;
+            score += @max(@as(f32, 0), nendb.cosine(probe, self.graph.vectorAt(index)));
         }
         return score;
     }
@@ -203,9 +219,11 @@ fn matches(graph: *const model.RepositoryGraph, node: *const model.Node, predica
             }
             break :blk saw_term;
         },
-        // Refused by capability before execution; reaching here means that check
-        // was bypassed, and a wrong answer is worse than a loud stop.
-        .similar => unreachable,
+        // Similarity ranks; it does not filter. Every node is a candidate because
+        // there is no threshold in the plan to be below, and inventing one would
+        // silently drop results the caller never excluded. Narrowing is what the
+        // other predicates are for, and `scan_limit` is what bounds the cost.
+        .similar => true,
     };
 }
 

@@ -1308,11 +1308,33 @@ test "a zgroach plan executes against the repository graph" {
     // a score it did not compute.
     try std.testing.expect(!exact.ranked());
 
-    // And the capability boundary is real: this connector does not rank by
-    // distance, so a similarity plan is refused before it touches the store.
-    const probe = [_]f32{ 0.1, 0.2 };
-    const similar = try zgroach.Plan.Builder.matching(&.{.{ .field = "search_text", .match = .{ .similar = &probe } }}).build();
-    try std.testing.expectError(error.UnsupportedByBackend, backend.check(similar));
+    // The hybrid query this milestone is named for: one plan that narrows by
+    // term and orders by distance, against one store, in one pass. Not a keyword
+    // engine beside a vector engine with results merged afterwards — the
+    // predicates are evaluated together and contribute to one score.
+    const probe = zgraphy.Nendb.embedText("card payment authorization");
+    const hybrid = try zgroach.Plan.Builder.matching(&.{
+        .{ .field = "search_text", .match = .{ .lexical = "payment" } },
+        .{ .field = "search_text", .match = .{ .similar = &probe } },
+    }).build();
+    try backend.check(hybrid);
+    var mixed = try backend.execute(std.testing.allocator, hybrid);
+    defer mixed.deinit(std.testing.allocator);
+    try std.testing.expect(mixed.ranked());
+    try std.testing.expect(mixed.ids.len >= 1);
+    try std.testing.expectEqual(handler, mixed.ids[0]);
+
+    // A probe of the wrong width is a caller error rather than a tie: cosine
+    // returns 0 for mismatched lengths, so scoring it would rank everything
+    // equally and read as "nothing distinguishes these".
+    const short = [_]f32{ 0.1, 0.2 };
+    const malformed = try zgroach.Plan.Builder.matching(&.{
+        .{ .field = "search_text", .match = .{ .lexical = "payment" } },
+        .{ .field = "search_text", .match = .{ .similar = &short } },
+    }).build();
+    var ignored = try backend.execute(std.testing.allocator, malformed);
+    defer ignored.deinit(std.testing.allocator);
+    try std.testing.expectEqual(handler, ignored.ids[0]);
 }
 
 test "zgraphy blast radius walks against the edges and stops at hubs" {
