@@ -1,0 +1,109 @@
+{
+  "schema": "zgraphy.query.v4",
+  "query": "resolve imports",
+  "embedder": "feature_hash_v1",
+  "generation": "g-f8419468fbb923dec1cfb4bddd7f7d45e21f26dccd2d6f83819ce06be5ca80f0",
+  "tree_verified": false,
+  "confidence": "high",
+  "confidence_reason": "",
+  "scanned": 891,
+  "corpus": 5603,
+  "results": [
+    {
+      "id": 17642997841897308639,
+      "label": "resolveFileImports",
+      "kind": "symbol",
+      "path": "src/indexer.zig",
+      "line": 1317,
+      "score": 0.7325016856193542,
+      "keyword_score": 1,
+      "vector_score": 0.7677016854286194,
+      "graph_score": 0.06903021782636642,
+      "matched_terms": 2
+    },
+    {
+      "id": 9626252925884807804,
+      "label": "importsFile",
+      "kind": "symbol",
+      "path": "src/indexer.zig",
+      "line": 697,
+      "score": 0.6419870853424072,
+      "keyword_score": 0.5194154977798462,
+      "vector_score": 1,
+      "graph_score": 0.29125046730041504,
+      "matched_terms": 1
+    },
+    {
+      "id": 402359497605552199,
+      "label": "importsFileForTest",
+      "kind": "symbol",
+      "path": "src/indexer.zig",
+      "line": 684,
+      "score": 0.5418971180915833,
+      "keyword_score": 0.5194154977798462,
+      "vector_score": 0.6771290898323059,
+      "graph_score": 0.35582464933395386,
+      "matched_terms": 1
+    },
+    {
+      "id": 15951628958309971667,
+      "label": "resolve",
+      "kind": "symbol",
+      "path": "src/protobuf_resolution.zig",
+      "line": 216,
+      "score": 0.4870733916759491,
+      "keyword_score": 0.4805844724178314,
+      "vector_score": 0.6445169448852539,
+      "graph_score": 0.2261471450328827,
+      "matched_terms": 1
+    },
+    {
+      "id": 15632767555683789743,
+      "label": "resolve",
+      "kind": "symbol",
+      "path": "src/typescript_resolution.zig",
+      "line": 267,
+      "score": 0.4847399592399597,
+      "keyword_score": 0.4805844724178314,
+      "vector_score": 0.6295666694641113,
+      "graph_score": 0.24064287543296814,
+      "matched_terms": 1
+    },
+    {
+      "id": 11310921019765738748,
+      "label": "resolve",
+      "kind": "symbol",
+      "path": "src/typescript_symbols.zig",
+      "line": 192,
+      "score": 0.4761260151863098,
+      "keyword_score": 0.4805844724178314,
+      "vector_score": 0.617596447467804,
+      "graph_score": 0.21852125227451324,
+      "matched_terms": 1
+    },
+    {
+      "id": 1622334333710347057,
+      "label": "resolve",
+      "kind": "symbol",
+      "path": "src/rpc_continuity.zig",
+      "line": 236,
+      "score": 0.47151339054107666,
+      "keyword_score": 0.4805844724178314,
+      "vector_score": 0.6069576144218445,
+      "graph_score": 0.21407590806484222,
+      "matched_terms": 1
+    },
+    {
+      "id": 1937483734820870781,
+      "label": "resolve",
+      "kind": "symbol",
+      "path": "src/zig_resolution.zig",
+      "line": 145,
+      "score": 0.4661348760128021,
+      "keyword_score": 0.4805844724178314,
+      "vector_score": 0.5921263098716736,
+      "graph_score": 0.21313823759555817,
+      "matched_terms": 1
+    }
+  ]
+}

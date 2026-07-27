@@ -2666,3 +2666,223 @@ button.layer-chip:hover {
     transition-duration: 0.001ms !important;
   }
 }
+
+/* ============================================================================
+   Code perspective — "where is the code that does X"
+
+   The design constraint is that this panel presents a ranking the reader did
+   not compute. So the evidence is never smaller than the verdict: the three
+   signal bars sit on every row at the same weight as the combined score, and a
+   low-confidence badge is always accompanied by its reason at readable size.
+   Both palettes inherit from the shared tokens, so nothing here hard-codes a
+   colour that would survive the light theme unchanged.
+   ============================================================================ */
+
+.code-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+.code-query {
+  display: flex;
+  gap: var(--sp-2);
+}
+.code-query .cq-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-sunken);
+  color: var(--text-0);
+  font-size: var(--fs-body);
+}
+.code-query .cq-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.code-query .cq-input:disabled {
+  color: var(--text-2);
+  cursor: not-allowed;
+}
+.code-query .cq-run {
+  padding: var(--sp-2) var(--sp-4);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface-hi);
+  color: var(--text-0);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+.code-query .cq-run:disabled {
+  color: var(--text-2);
+  cursor: not-allowed;
+}
+
+.code-verdict {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  font-size: var(--fs-micro);
+}
+.code-verdict .cv-confidence {
+  padding: 2px var(--sp-2);
+  border-radius: 4px;
+  background: var(--ok-bg);
+  color: var(--ok);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.code-verdict .cv-confidence.low {
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+/* The reason reads at body weight, not as fine print: a verdict the reader
+   cannot evaluate is one they can only obey. */
+.code-verdict .cv-reason {
+  color: var(--text-1);
+  font-size: var(--fs-sm);
+}
+.code-verdict .cv-embedder,
+.code-verdict .cv-verified {
+  color: var(--text-2);
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+.code-truncation {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--warn);
+  border-radius: 4px;
+  background: var(--bg-1);
+  color: var(--text-1);
+  font-size: var(--fs-sm);
+}
+
+.code-error {
+  margin: 0;
+  color: var(--danger, var(--warn));
+  font-size: var(--fs-sm);
+}
+.code-empty {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+.code-results {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.code-result {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+}
+.code-result.selectable {
+  cursor: pointer;
+}
+.code-result.selectable:hover {
+  background: var(--surface-hi);
+}
+
+.code-result .cr-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.code-result .cr-label {
+  color: var(--text-0);
+  font-size: var(--fs-body);
+  font-weight: 600;
+}
+.code-result .cr-kind {
+  padding: 1px var(--sp-1);
+  border-radius: 3px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-size: var(--fs-micro);
+}
+.code-result .cr-where {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-2);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--fs-micro);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.code-result .cr-score {
+  color: var(--text-1);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.code-result .cr-signals {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+}
+.code-signal {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+.code-signal .cs-label {
+  color: var(--text-2);
+  font-size: var(--fs-micro);
+  /* Fixed width so three bars on one row start at the same x and can be
+     compared down the list rather than only within a row. */
+  min-width: 22px;
+}
+.code-signal .cs-track {
+  display: inline-block;
+  width: 72px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--surface-sunken);
+  overflow: hidden;
+}
+.code-signal .cs-fill {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent);
+}
+.code-signal .cs-value {
+  color: var(--text-1);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--fs-micro);
+  font-variant-numeric: tabular-nums;
+  min-width: 30px;
+}
+
+.code-result .cr-terms {
+  color: var(--text-2);
+  font-size: var(--fs-micro);
+}
+/* A partial match is the one thing on this row that changes what the reader
+   should conclude, so it is the only thing coloured. */
+.code-result .cr-terms.partial {
+  color: var(--warn);
+  font-weight: 600;
+}

@@ -52,6 +52,8 @@ import { SafetyPanel } from "./safety/SafetyPanel";
 import { loadSafetyReceipt } from "./safety/safetyReceipt";
 import { TestPanel } from "./testing/TestPanel";
 import { loadTestRunReceipt } from "./testing/testReceipt";
+import { CodePanel } from "./code/CodePanel";
+import { CODE_QUERY_LIMIT, loadCodeQuery } from "./code/repositoryQuery";
 import {
   deriveProjectDevelopmentModel,
   type ProjectDevelopmentModel,
@@ -64,6 +66,7 @@ const auxTitles: Record<AuxView, string> = {
   queries: "Query catalogue",
   safety: "Agent safety evidence",
   tests: "Agent test evidence",
+  code: "Code search",
 };
 
 type Tab = "timeline" | "agents" | "findings" | "graph" | "visual-graph" | "diff" | "chain" | "queries" | "metadata";
@@ -109,13 +112,14 @@ export function workbenchLensesForArtifact(): Array<{ id: Lens; label: string }>
 
 /** The auxiliary views the old tab bar dissolved into (reachable via ⌘K / More). */
 export function workbenchAuxViews(): AuxView[] {
-  return ["diff", "chain", "metadata", "queries", "safety", "tests"];
+  return ["diff", "chain", "metadata", "queries", "safety", "tests", "code"];
 }
 
 export function App() {
   const [payload] = createResource(loadPayload);
   const [safetyReceipt] = createResource(loadSafetyReceipt);
   const [testRun] = createResource(loadTestRunReceipt);
+  const [codeQuery] = createResource(loadCodeQuery);
   const [selectedId, setSelectedId] = createSignal<string | null>(null);
   const [search, setSearch] = createSignal("");
   const [kind, setKind] = createSignal("all");
@@ -762,6 +766,16 @@ export function App() {
                         error={safetyReceipt.error instanceof Error ? safetyReceipt.error.message : undefined}
                         copiedCommand={copiedCommand()}
                         onCopy={copyCommand}
+                      />
+                    </Show>
+                    <Show when={view === "code"}>
+                      {/* No `onQuery`: this build reads a captured answer, and
+                          the box says so rather than accepting text it cannot
+                          run. Attaching an engine is one prop. */}
+                      <CodePanel
+                        model={codeQuery() ?? null}
+                        error={codeQuery.error instanceof Error ? codeQuery.error.message : null}
+                        limit={CODE_QUERY_LIMIT}
                       />
                     </Show>
                     <Show when={view === "tests"}>

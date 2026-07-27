@@ -4,7 +4,7 @@ import type { Lens } from "../theme";
 import type { TraceFindingMark } from "../trace/traceModel";
 import { Overlay } from "./Overlay";
 
-export type AuxView = "diff" | "chain" | "metadata" | "queries" | "safety" | "tests";
+export type AuxView = "diff" | "chain" | "metadata" | "queries" | "safety" | "tests" | "code";
 
 type PaletteItem = { id: string; label: string; hint?: string; run: () => void };
 
@@ -30,6 +30,10 @@ export function CommandPalette(props: {
       { id: "lens-exec", label: "Switch to Execution lens", hint: "⌘1", run: () => props.onSetLens("execution") },
       { id: "lens-collab", label: "Switch to Collaboration lens", hint: "⌘2", run: () => props.onSetLens("collaboration") },
       { id: "theme", label: "Toggle dark / light theme", run: () => props.onToggleTheme() },
+      // Listed above the evidence views because it answers a different question
+      // from the rest of the palette: not "what did this run do" but "where is
+      // the code that does X".
+      { id: "code", label: "Search the repository graph", run: () => props.onOpenAux("code") },
       { id: "safety", label: "Open agent safety evidence", run: () => props.onOpenAux("safety") },
       { id: "tests", label: "Open requirement-linked test evidence", run: () => props.onOpenAux("tests") },
       { id: "metadata", label: "Open metadata", run: () => props.onOpenAux("metadata") },

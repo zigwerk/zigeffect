@@ -19,7 +19,11 @@ test("workbench labels the lenses for humans", () => {
 test("the dissolved tabs survive as auxiliary views", () => {
   const auxIds = workbenchAuxViews();
 
-  expect(auxIds).toEqual(["diff", "chain", "metadata", "queries", "safety", "tests"]);
+  // `code` is not a dissolved tab — it is the code perspective, which asks the
+  // same graph "where is the code that does X" rather than "what did this run
+  // do". It joins the same overlay because it is a place you go and come back
+  // from, not a lens you work inside.
+  expect(auxIds).toEqual(["diff", "chain", "metadata", "queries", "safety", "tests", "code"]);
   // the old flat tab bar is gone; these are reachable via the command palette / More.
   expect(auxIds).not.toContain("timeline");
   expect(auxIds).not.toContain("visual-graph");
