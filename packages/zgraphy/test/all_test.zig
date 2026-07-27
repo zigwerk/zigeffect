@@ -1261,6 +1261,39 @@ test "zgraphy graph index round-trips facts and refuses a mismatched source" {
     );
 }
 
+test "a service declaration is indexed where it is written, and prose is not one" {
+    var graph = try zgraphy.RepositoryGraph.init(std.testing.allocator, .{});
+    defer graph.deinit();
+
+    try zgraphy.Indexer.indexZigSource(&graph,
+        \\src/app.zig
+    ,
+        \\const kernel = @import("kernel.zig");
+        \\
+        \\pub const Inputs = kernel.Service("app/Inputs", InputsApi);
+        \\
+        \\// An example in a comment: Service("app/NotReal", Api)
+        \\pub const Registry = MyServiceRegistry("app/AlsoNotReal");
+        \\
+    );
+
+    var found: usize = 0;
+    for (graph.nodes.items) |node| {
+        if (node.kind != .service) continue;
+        found += 1;
+        // The line is the join's whole value: a causal event naming this key
+        // has to land somewhere a reader can open.
+        try std.testing.expectEqualStrings("app/Inputs", node.label);
+        try std.testing.expectEqual(@as(u32, 3), node.line);
+        try std.testing.expectEqualStrings("src/app.zig", node.path);
+    }
+
+    // One, not three. The commented example indexed itself the first time this
+    // ran — the graph then claimed the file describing the join also performed
+    // it — and `MyServiceRegistry` merely ends in the word being matched.
+    try std.testing.expectEqual(@as(usize, 1), found);
+}
+
 test "a callee this pass cannot place is counted, not invented" {
     var graph = try zgraphy.RepositoryGraph.init(std.testing.allocator, .{});
     defer graph.deinit();

@@ -550,6 +550,7 @@ fn indexParsedZigSource(
             .span = declaration_fact.span,
         });
     }
+    try indexServiceDeclarations(graph, path, source, file_id);
     for (parsed.declarations, 0..) |declaration_fact, declaration_index| {
         const owner = if (smallestContainingDeclaration(parsed.declarations, declaration_index)) |owner_index|
             symbols.items[owner_index].id
@@ -705,6 +706,79 @@ fn importsFile(graph: *const model.RepositoryGraph, file_id: u64, path: []const 
     return false;
 }
 
+/// Record every `Service("key", …)` this file declares.
+///
+/// A service key is the one name a running program and its source agree on
+/// character for character: the runtime writes `service_key` onto causal events,
+/// and the source states the same literal. Joining on it needs no source-location
+/// plumbing, no build-injected path prefixes and no change to the event contract
+/// — unlike `domain_entity_ref`, which has a complete parser on this side and is
+/// empty on all 964 events because nothing produces it.
+///
+/// Scanned from the file text rather than from a declaration, because the thing
+/// being looked for is not a declaration the parser reports: `pub const X =
+/// kernel.Service("…", Api);` is a `const` bound to a call result, and
+/// `parsed.declarations` carries functions and types only. Attaching to the file
+/// is also the honest claim — "this file declares this service" is exactly what
+/// was observed, where "this symbol declares it" would be inferred.
+///
+/// Deliberately literal: the key must be a string literal directly after the
+/// paren. A computed key is one the runtime and the source cannot be shown to
+/// agree on, and a join that might be wrong is worse than none — it would put a
+/// runtime event on a line that did not produce it.
+fn indexServiceDeclarations(
+    graph: *model.RepositoryGraph,
+    path: []const u8,
+    source: []const u8,
+    file_id: u64,
+) !void {
+    const needle = "Service(\"";
+    var cursor: usize = 0;
+    while (std.mem.indexOfPos(u8, source, cursor, needle)) |start| {
+        cursor = start + needle.len;
+        // `MyServiceRegistry("…")` is not a service declaration. Requiring a
+        // non-identifier character before the match keeps `kernel.Service(`,
+        // `fx.kernel.Service(` and an aliased import all reading the same
+        // without matching a longer name that merely ends in `Service`.
+        if (start > 0) {
+            const before = source[start - 1];
+            if (std.ascii.isAlphanumeric(before) or before == '_') continue;
+        }
+        // Prose is not a declaration. This function's own doc comment contains
+        // `Service("key", …)` as an example, and the first run of it indexed
+        // that comment as two services in `indexer.zig` — a graph asserting that
+        // the file describing the join also performs it.
+        //
+        // Skipping is the safe direction: a `//` inside a string literal on the
+        // same line costs a missed join, where trusting the line would cost a
+        // fabricated one.
+        const line_start = if (std.mem.lastIndexOfScalar(u8, source[0..start], '\n')) |index| index + 1 else 0;
+        if (std.mem.indexOf(u8, source[line_start..start], "//") != null) continue;
+        const rest = source[cursor..];
+        const end = std.mem.indexOfScalar(u8, rest, '"') orelse continue;
+        if (end == 0) continue;
+        if (std.mem.indexOfScalar(u8, rest[0..end], '\\') != null) continue;
+        const key = rest[0..end];
+
+        const line: u32 = @intCast(1 + std.mem.count(u8, source[0..start], "\n"));
+        const service_id = try graph.addNode(.{
+            .kind = .service,
+            .label = key,
+            .path = path,
+            .line = line,
+            .search_text = key,
+        });
+        try graph.addEdge(.{
+            .from = file_id,
+            .to = service_id,
+            .relation = .declares,
+            .provenance = .extracted,
+            .source_path = path,
+            .line = line,
+        });
+    }
+}
+
 fn calleeLeaf(callee: []const u8) []const u8 {
     const dot = std.mem.lastIndexOfScalar(u8, callee, '.');
     const leaf = if (dot) |index| callee[index + 1 ..] else callee;
@@ -827,6 +901,15 @@ pub fn indexCausalRecords(graph: *model.RepositoryGraph, wal_path: []const u8, j
         label: []const u8 = "",
         status: []const u8 = "",
         domain_entity_ref: []const u8 = "",
+        /// The one join field that is actually populated.
+        ///
+        /// `domain_entity_ref` is declared, serialized, parsed by
+        /// `sourceRefTarget` — and empty on all 964 events in this repository,
+        /// because nothing produces it. `service_key` is written by the runtime
+        /// whenever a service is provided or a scope opened under one: 98 of
+        /// those 964, carrying `zgraphy/ApplicationInputs`, which is a string
+        /// constant declared at exactly one place in the source.
+        service_key: []const u8 = "",
     };
     const Parent = struct { session_id: u64, child: u64, parent_event_id: u64 };
     var parents: std.ArrayList(Parent) = .empty;
@@ -864,6 +947,21 @@ pub fn indexCausalRecords(graph: *model.RepositoryGraph, wal_path: []const u8, j
                 .provenance = .extracted,
                 .source_path = wal_path,
             });
+        }
+        // The service this event ran under, joined to where that service is
+        // declared. Exact string identity between a key the runtime wrote and a
+        // key the source declares — not a name heuristic, and not a guess about
+        // which function was on the stack.
+        if (event.service_key.len > 0) {
+            if (findByKindAndLabel(graph, .service, event.service_key)) |service| {
+                try graph.addEdge(.{
+                    .from = node_id,
+                    .to = service.id,
+                    .relation = .observed_at,
+                    .provenance = .extracted,
+                    .source_path = wal_path,
+                });
+            }
         }
         imported += 1;
     }
