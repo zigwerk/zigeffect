@@ -246,6 +246,11 @@ fn mainServer(init: std.process.Init.Minimal) !void {
                 });
                 log_err_count = 0;
                 const index = try server.receiveBody_u32();
+                // The build runner restarts this binary after a crash and can
+                // send .run_test without repeating .query_test_metadata, so the
+                // results array may not exist yet. Indexing it then panics
+                // inside the runner and buries whatever the test was reporting.
+                initializeResults();
                 const test_fn = builtin.test_functions[index];
                 is_fuzz_test = false;
                 const test_started = Io.Clock.awake.now(runner_threaded_io);
