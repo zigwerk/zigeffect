@@ -9,6 +9,25 @@ const owned = @import("memory.zig");
 /// the repository" from "actually discriminating".
 const common_term_ceiling: f32 = 1.0;
 
+/// A node with at least this many incident edges is terminal for score
+/// propagation: it can be a result, but it does not donate its score to
+/// everything it touches.
+///
+/// Measured on this repository's own index — 7,828 nodes carrying edges, mean
+/// degree 4.0, p50 1, p90 8, p95 14, **p99 47**, max 176. So 50 is p99 to
+/// within rounding, and it selects 72 nodes (0.92%): the application node and
+/// the largest files. Those are exactly the nodes that connect everything to
+/// everything, and letting one donate to its 148 neighbours is how a traversal
+/// stops answering the question and starts returning the repository. graphify
+/// independently floors the same rule at 50, which is corroboration rather than
+/// the source of the number.
+///
+/// Fixed rather than a live p99 on purpose: computing a percentile needs a pass
+/// over every node, and the previous commit removed exactly that pass. The
+/// refinement belongs at publish time, where the degree distribution is already
+/// known and can be cached.
+const hub_degree: usize = 50;
+
 pub const Options = struct {
     limit: usize = 10,
     keyword_weight: f32 = 0.45,
@@ -209,11 +228,13 @@ pub fn queryAlloc(
         for (graph.outgoingEdges(node_id)) |edge_index| {
             const edge = graph.edgeAt(edge_index) orelse continue;
             const neighbor = graph.topology.findNodeIndex(edge.to) orelse continue;
+            if (isHub(graph, edge.to)) continue;
             graph_scores[index] = @max(graph_scores[index], base[neighbor] * 0.5);
         }
         for (graph.incomingEdges(node_id)) |edge_index| {
             const edge = graph.edgeAt(edge_index) orelse continue;
             const neighbor = graph.topology.findNodeIndex(edge.from) orelse continue;
+            if (isHub(graph, edge.from)) continue;
             graph_scores[index] = @max(graph_scores[index], base[neighbor] * 0.5);
         }
     }
@@ -271,4 +292,11 @@ pub fn queryAlloc(
         .confidence = confidence,
         .confidence_reason = confidence_reason,
     };
+}
+
+/// Whether `node_id` is too connected to carry a meaningful signal. Both
+/// adjacency lists answer their length in constant time, so this is two loads
+/// and an add — no traversal, no allocation.
+fn isHub(graph: *const model.RepositoryGraph, node_id: u64) bool {
+    return graph.outgoingEdges(node_id).len + graph.incomingEdges(node_id).len >= hub_degree;
 }

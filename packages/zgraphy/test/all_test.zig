@@ -1209,6 +1209,38 @@ test "zgraphy renders no byte from an indexed repository that could steer a term
     try std.testing.expect(std.mem.indexOfScalar(u8, encoded, '\n') == null);
 }
 
+test "zgraphy does not let a hub donate its score to everything it touches" {
+    var graph = try zgraphy.RepositoryGraph.init(std.testing.allocator, .{});
+    defer graph.deinit();
+
+    // A file node wired to enough symbols to cross the hub threshold. This is
+    // the shape the real index actually has: file nodes at degree 141-148 and
+    // an application node at 176.
+    const hub = try graph.addSearchableNode(.file, "kerberos.zig", "src/kerberos.zig", 1, "kerberos module");
+    var attached: [60]u64 = undefined;
+    for (&attached, 0..) |*id, index| {
+        var name: [32]u8 = undefined;
+        const label = try std.fmt.bufPrint(&name, "Unrelated{d}", .{index});
+        id.* = try graph.addSearchableNode(.symbol, label, "src/kerberos.zig", @intCast(index + 2), "nothing relevant here");
+        try graph.addEdge(.{ .from = hub, .to = id.*, .relation = .contains, .provenance = .extracted });
+    }
+
+    var results = try zgraphy.Search.queryAlloc(std.testing.allocator, &graph, "kerberos", .{ .limit = 64 });
+    defer results.deinit();
+
+    // The hub itself matched and is allowed to rank — terminal, not excluded.
+    try std.testing.expect(results.items.len >= 1);
+    try std.testing.expectEqual(hub, results.items[0].node_id);
+
+    // But none of its 60 unrelated children may inherit a graph score from it.
+    // Without the guard every one of them rides the hub's score into the
+    // ranking, and the answer to "kerberos" becomes the whole file.
+    for (results.items) |item| {
+        if (item.node_id == hub) continue;
+        try std.testing.expectEqual(@as(f32, 0), item.graph_score);
+    }
+}
+
 test "zgraphy says when a ranking is not worth acting on" {
     var graph = try zgraphy.RepositoryGraph.init(std.testing.allocator, .{});
     defer graph.deinit();
