@@ -28,7 +28,40 @@ pub fn main(init: std.process.Init) !void {
 
 fn runCommand(ctx: *zstd.fx.kernel.ContextView(zgraphy.Application.ApplicationServices), command_line: zstd.Cli.ParsedCommand) anyerror!void {
     const inputs = ctx.service(zgraphy.Application.ApplicationInputs);
-    try dispatch(ctx.allocator(), inputs.io, inputs.root, command_line);
+    dispatch(ctx.allocator(), inputs.io, inputs.root, command_line) catch |failure| {
+        try explainFailure(ctx.allocator(), inputs.io, inputs.root, failure);
+        return failure;
+    };
+}
+
+/// Say what a bare error name cannot.
+///
+/// Zig errors carry no payload, so a repository that outgrows its graph budget
+/// receives `error.NodeCapacityExceeded` and nothing else — not the limit it
+/// hit, not the key that raises it, not its own current size. The limit is a
+/// manifest field with a default, so this is a one-line configuration change
+/// that reads like a defect in the tool.
+///
+/// Only errors where the name genuinely withholds the fix belong here. An error
+/// that already says what to do does not need a second voice.
+fn explainFailure(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, failure: anyerror) !void {
+    const key: []const u8, const limit: usize = switch (failure) {
+        error.NodeCapacityExceeded => .{ "max_nodes", blk: {
+            var config = zgraphy.Project.loadConfig(allocator, io, root) catch break :blk 0;
+            defer config.deinit();
+            break :blk config.value.max_nodes;
+        } },
+        error.EdgeCapacityExceeded => .{ "max_edges", blk: {
+            var config = zgraphy.Project.loadConfig(allocator, io, root) catch break :blk 0;
+            defer config.deinit();
+            break :blk config.value.max_edges;
+        } },
+        else => return,
+    };
+    // Name the file from the constant rather than from memory: a message that
+    // sends someone to a path that does not exist is worse than no message.
+    try writeText(io, allocator, "this repository needs a larger graph budget: {s} is {d}\n" ++
+        "raise {s} in {s} and run `zgraphy build` again\n", .{ key, limit, key, zgraphy.Project.config_path });
 }
 
 /// Command, subcommand, positional, and option authority is the resolved
