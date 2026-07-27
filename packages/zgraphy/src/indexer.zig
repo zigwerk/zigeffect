@@ -52,6 +52,22 @@ pub const BuildSummary = struct {
     ownership_manifest_digest: [32]u8 = @splat(0),
     ownership: ownership.Summary = .{},
     causal_records: usize = 0,
+    /// Calls whose callee named nothing this pass could place.
+    ///
+    /// A pending record rather than an edge. These used to become a synthesized
+    /// `concept` node plus an `.ambiguous` edge, which put 2973 dead ends into
+    /// the neighbourhood of the 1944 real call edges and made a symbol's call
+    /// flow 72% unfollowable. Counting them keeps the one thing that was worth
+    /// having — how much of the call graph is actually known — without pretending
+    /// an unplaceable name is somewhere to go.
+    ///
+    /// Zig sources only — this is the pass that used to synthesize the
+    /// placeholders. It is a coverage figure for the Zig call graph, not for
+    /// every language in the repository.
+    unresolved_calls: usize = 0,
+    /// Calls in the same pass whose callee was placed, so `unresolved_calls`
+    /// has a denominator and reads as coverage rather than as a bare count.
+    resolved_calls: usize = 0,
     module_resolutions: usize = 0,
     module_resolution_diagnostics: usize = 0,
     symbol_resolutions: usize = 0,
@@ -270,7 +286,7 @@ pub fn buildRepository(
         defer parsed_value.deinit();
         try zig_corpus.addParsedOwned(&parsed_value);
         const parsed = zig_corpus.parsedForPath(record.relative_path) orelse return error.MissingParsedZigSource;
-        try indexParsedZigSource(&graph, record.relative_path, source, parsed);
+        try indexParsedZigSource(&graph, record.relative_path, source, parsed, &summary.unresolved_calls, &summary.resolved_calls);
         summary.files_indexed += 1;
     }
     for (discovered.records) |record| {
@@ -415,10 +431,27 @@ fn readVerifiedSource(
 }
 
 pub fn indexZigSource(graph: *model.RepositoryGraph, path: []const u8, source: []const u8) !void {
+    var unresolved_calls: usize = 0;
+    var resolved_calls: usize = 0;
+    try indexZigSourceCounting(graph, path, source, &unresolved_calls, &resolved_calls);
+}
+
+/// Index one file and report how many of its calls named nothing placeable.
+///
+/// Separate from `indexZigSource` so the common caller is not made to hold a
+/// counter it does not read, while a caller that wants the coverage figure can
+/// have it without reaching into the build pipeline.
+pub fn indexZigSourceCounting(
+    graph: *model.RepositoryGraph,
+    path: []const u8,
+    source: []const u8,
+    unresolved_calls: *usize,
+    resolved_calls: *usize,
+) !void {
     try validateSourcePath(path);
     var parsed = try zig_parser.parse(graph.allocator, path, source, .{});
     defer parsed.deinit();
-    try indexParsedZigSource(graph, path, source, &parsed);
+    try indexParsedZigSource(graph, path, source, &parsed, unresolved_calls, resolved_calls);
 }
 
 pub fn indexTypeScriptSource(
@@ -483,6 +516,8 @@ fn indexParsedZigSource(
     path: []const u8,
     source: []const u8,
     parsed: *const zig_parser.Result,
+    unresolved_calls: *usize,
+    resolved_calls: *usize,
 ) !void {
     const file_label = std.fs.path.basename(path);
     const file_id = try graph.addNode(.{
@@ -576,15 +611,27 @@ fn indexParsedZigSource(
         const callee = calleeLeaf(call_fact.callee);
         if (callee.len == 0) continue;
         const local_target = findUniqueLocalBinding(local_bindings.items, callee, call_fact.enclosing_declaration);
-        const target = local_target orelse findUniqueSymbol(symbols.items, callee) orelse try graph.addNode(.{
-            .kind = .concept,
-            .label = callee,
-            .path = path,
-            .line = call_fact.callee_span.start_line,
-            .search_text = call_fact.callee,
-        });
+        // A name this pass cannot place is a pending reference, not an edge.
+        //
+        // It used to be both: a synthesized `concept` node standing in for the
+        // callee, and a `.calls` edge to it labelled `.ambiguous`. The node had
+        // no outgoing edges and no definition behind it, so following the edge
+        // arrived nowhere — and there were 2973 of them against 1944 real call
+        // edges, so 72% of what a symbol's neighbourhood showed was unfollowable.
+        //
+        // Nothing is lost by not writing it. Where the callee is a symbol in
+        // another file, `materializeZigResolutions` binds the real edge later
+        // with the actual target; where it is `std.mem.eql` or a method on a
+        // type, there is no node in this repository to point at and a
+        // placeholder only asserts otherwise. The count survives so a reader can
+        // still tell how much of the call graph is known.
+        const target = local_target orelse findUniqueSymbol(symbols.items, callee) orelse {
+            unresolved_calls.* += 1;
+            continue;
+        };
         if (target == caller) continue;
         const target_node = graph.findNode(target) orelse continue;
+        resolved_calls.* += 1;
         try graph.addEdge(.{
             .from = caller,
             .to = target,

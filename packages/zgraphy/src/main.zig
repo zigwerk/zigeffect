@@ -175,6 +175,21 @@ fn runBuild(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, json: bo
         },
         .retention = managed.publication.retention,
     });
+    // How much of the Zig call graph is actually known, stated rather than
+    // implied. An unplaceable callee no longer becomes a node, so the only way
+    // to tell a thin call graph from a complete one is to say so — and a reader
+    // deciding whether to trust `--edges` needs exactly this number.
+    const placed = managed.summary.resolved_calls;
+    const pending = managed.summary.unresolved_calls;
+    const total = placed + pending;
+    if (total > 0) {
+        try writeText(io, allocator, "zig call graph: {d}/{d} callees placed ({d}%); {d} pending reference(s) not written as edges\n", .{
+            placed,
+            total,
+            placed * 100 / total,
+            pending,
+        });
+    }
     return writeText(io, allocator, "built {d} nodes, {d} edges, {d} vectors, {d} request paths, {d} feature supernodes from {d} files ({d} reparsed, {d} cache hits, derived {d}/{d} reused, {d} lexical terms) -> {s} ({s})\n", .{
         managed.summary.nodes,
         managed.summary.edges,
@@ -1238,15 +1253,26 @@ fn writeNeighbours(
     inline for (.{ true, false }) |outgoing| {
         const edge_indexes = if (outgoing) graph.outgoingEdges(node_id) else graph.incomingEdges(node_id);
         var shown: usize = 0;
+        var skipped: usize = 0;
         for (edge_indexes) |edge_index| {
-            if (shown >= limit) {
-                try writeText(io, allocator, "      ... {d} more\n", .{edge_indexes.len - shown});
-                written += 20;
-                break;
-            }
             const edge = graph.edgeAt(edge_index) orelse continue;
             const other_id = if (outgoing) edge.to else edge.from;
             const other = graph.findNode(other_id) orelse continue;
+            // This view answers "where does control go from here", so a
+            // neighbour that is not a destination does not belong in it. Every
+            // local `const` a function declares is a neighbour, and there are
+            // typically more of them than there are calls: asked for eight
+            // neighbours of `resolveFileImports`, this printed seven local
+            // variables and one real call.
+            if (!other.kind.isAnswer()) {
+                skipped += 1;
+                continue;
+            }
+            if (shown >= limit) {
+                try writeText(io, allocator, "      ... {d} more\n", .{edge_indexes.len - skipped - shown});
+                written += 20;
+                break;
+            }
             var label: zgraphy.Sanitize.Buffer = undefined;
             var path: zgraphy.Sanitize.Buffer = undefined;
             try writeText(io, allocator, "      {s} {s} {s} [{s}] {s}:{d}\n", .{

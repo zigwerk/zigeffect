@@ -1261,6 +1261,41 @@ test "zgraphy graph index round-trips facts and refuses a mismatched source" {
     );
 }
 
+test "a callee this pass cannot place is counted, not invented" {
+    var graph = try zgraphy.RepositoryGraph.init(std.testing.allocator, .{});
+    defer graph.deinit();
+
+    var unresolved: usize = 0;
+    var resolved: usize = 0;
+    try zgraphy.Indexer.indexZigSourceCounting(&graph,
+        \\src/only.zig
+    , // path
+        \\pub fn helper() void {}
+        \\pub fn caller() void {
+        \\    helper();
+        \\    std.mem.eql(u8, "a", "b");
+        \\}
+        \\
+    , &unresolved, &resolved);
+
+    // `helper` is here, so it is placed and the edge is real.
+    try std.testing.expectEqual(@as(usize, 1), resolved);
+    // `eql` is not, and there is nothing in this repository to point at.
+    try std.testing.expectEqual(@as(usize, 1), unresolved);
+
+    // The part that matters: no stand-in was written. A synthesized node would
+    // have looked like a destination in every neighbourhood view and led
+    // nowhere, which is what made 72% of a symbol's edges unfollowable.
+    for (graph.nodes.items) |node| {
+        try std.testing.expect(!(node.kind == .concept and std.mem.eql(u8, node.label, "eql")));
+    }
+    for (graph.edges.items) |edge| {
+        if (edge.relation != .calls) continue;
+        const target = graph.findNode(edge.to).?;
+        try std.testing.expect(target.kind.isAnswer());
+    }
+}
+
 test "a local binding lifts the symbol that declares it instead of outranking it" {
     var graph = try zgraphy.RepositoryGraph.init(std.testing.allocator, .{});
     defer graph.deinit();
@@ -1980,8 +2015,16 @@ test "zgraphy M0 native differential adapter reports canonical matches and inter
     try std.testing.expectEqual(@as(usize, 0), mutation_receipt.entities.missing);
     try std.testing.expectEqual(@as(usize, 7), mutation_receipt.relations.matched);
     try std.testing.expectEqual(@as(usize, 0), mutation_receipt.relations.missing);
-    try std.testing.expectEqual(@as(usize, 3), mutation_receipt.entities.unexpected);
-    try std.testing.expectEqual(@as(usize, 7), mutation_receipt.relations.unexpected);
+    // Two, not three. `main.zig` calls `catalog.feature()`, and the file-local
+    // pass cannot place a callee defined in another file — that used to
+    // synthesize a `feature` entity at `src/main.zig` which the canonical model
+    // has no concept of, so it counted as an internal extra. It is now a pending
+    // reference and is not projected. `matched` and `missing` are unchanged,
+    // which is the check that this removed an invention rather than a fact: the
+    // real `main -> catalog.feature` relation is still matched, because
+    // `materializeZigResolutions` writes it against the actual symbol.
+    try std.testing.expectEqual(@as(usize, 2), mutation_receipt.entities.unexpected);
+    try std.testing.expectEqual(@as(usize, 6), mutation_receipt.relations.unexpected);
 
     try assertions.boolean(.{
         .id = "zgraphy.m0.native-adapter-honest-projection",
