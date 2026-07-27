@@ -140,9 +140,22 @@ pub const Plan = struct {
 
 fn checkField(node: Schema.Node, predicate: Predicate) !void {
     const field = try node.field(predicate.field);
-    const wants_text = predicate.match == .text;
-    const holds_number = field.kind == .id or field.kind == .integer;
-    if (holds_number == wants_text) return error.FieldKindMismatch;
+    // Answer the question per kind rather than inferring it from whether the
+    // column holds a number. `FieldKind` has five variants and the boolean had
+    // room for two, so `.document` and `.vector` fell through: neither holds a
+    // number, so a text-equality predicate on an embedding validated cleanly.
+    //
+    // A document is ranked by relevance and a vector is ordered by distance.
+    // Neither answers "is it equal to this", which is the only question a
+    // `Predicate` can ask today. Refusing them here is what keeps the capability
+    // flags honest — when a ranking operator exists it will be a different node,
+    // not an equality predicate that happens to be pointed at a ranked column.
+    const accepts: bool = switch (field.kind) {
+        .text => predicate.match == .text,
+        .integer, .id => predicate.match == .id,
+        .document, .vector => false,
+    };
+    if (!accepts) return error.FieldKindMismatch;
 }
 
 /// What a plan produced, and whether any bound cut it short.
@@ -225,6 +238,41 @@ test "a plan refuses shapes the executor could not honour" {
         error.InvalidPlan,
         Builder.fromEvent(1).traverse(&.{.{ .direction = .children, .max_depth = 0 }}).build(),
     );
+}
+
+test "equality is refused on columns that are ranked, not compared" {
+    // FieldKind has five variants and the check collapsed them to one boolean:
+    // "does this hold a number". A vector is ordered by distance and a document
+    // is ranked by relevance, so neither answers an equality predicate — but
+    // neither holds a number either, so both validated cleanly.
+    const commerce = Schema.Schema{
+        .name = "commerce",
+        .nodes = &.{.{ .name = "User", .table = "user", .fields = &.{
+            .{ .name = "id", .column = "id", .kind = .id },
+            .{ .name = "status", .column = "status" },
+            .{ .name = "bio", .column = "bio_search", .kind = .document },
+            .{ .name = "profile", .column = "embedding", .kind = .vector },
+        } }},
+        .relations = &.{},
+    };
+
+    const text_on_vector = try Builder.matching(&.{.{ .field = "profile", .match = .{ .text = "x" } }}).build();
+    try std.testing.expectError(error.FieldKindMismatch, text_on_vector.validateAgainst(commerce, "User"));
+
+    const text_on_document = try Builder.matching(&.{.{ .field = "bio", .match = .{ .text = "x" } }}).build();
+    try std.testing.expectError(error.FieldKindMismatch, text_on_document.validateAgainst(commerce, "User"));
+
+    // Both remain refused for id matching too, which the old rule happened to
+    // get right by the same accident that made it wrong above.
+    const id_on_vector = try Builder.matching(&.{.{ .field = "profile", .match = .{ .id = 1 } }}).build();
+    try std.testing.expectError(error.FieldKindMismatch, id_on_vector.validateAgainst(commerce, "User"));
+
+    // And the ordinary columns still work.
+    const fine = try Builder.matching(&.{
+        .{ .field = "status", .match = .{ .text = "active" } },
+        .{ .field = "id", .match = .{ .id = 9 } },
+    }).build();
+    try fine.validateAgainst(commerce, "User");
 }
 
 test "a plan is only meaningful once a schema says what its names are" {
