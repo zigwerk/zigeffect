@@ -1289,6 +1289,25 @@ test "a zgroach plan executes against the repository graph" {
     defer none.deinit(std.testing.allocator);
     try std.testing.expectEqual(@as(usize, 0), none.ids.len);
 
+    // Ranking orders the answer, and the order has to come from the node rather
+    // than from the query. Both of these contain "kerberos"; one has it as its
+    // label and the other only in prose, so a scorer that reads only the query
+    // would tie them and this assertion would fail.
+    const titled = try graph.addSearchableNode(.symbol, "kerberos", "src/a.zig", 1, "helper");
+    _ = try graph.addSearchableNode(.symbol, "Unrelated", "src/b.zig", 1, "mentions kerberos in passing");
+    const ranked_plan = try zgroach.Plan.Builder.matching(&.{.{ .field = "search_text", .match = .{ .lexical = "kerberos" } }}).build();
+    var ordered = try backend.execute(std.testing.allocator, ranked_plan);
+    defer ordered.deinit(std.testing.allocator);
+    try std.testing.expect(ordered.ranked());
+    try std.testing.expectEqual(ordered.ids.len, ordered.scores.len);
+    try std.testing.expect(ordered.ids.len >= 2);
+    try std.testing.expectEqual(titled, ordered.ids[0]);
+    try std.testing.expect(ordered.scores[0] > ordered.scores[1]);
+
+    // An exact match is a set, not a ranking, and says so rather than reporting
+    // a score it did not compute.
+    try std.testing.expect(!exact.ranked());
+
     // And the capability boundary is real: this connector does not rank by
     // distance, so a similarity plan is refused before it touches the store.
     const probe = [_]f32{ 0.1, 0.2 };

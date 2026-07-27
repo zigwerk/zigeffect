@@ -192,9 +192,28 @@ pub const Result = struct {
     ids: []u64,
     scanned: usize,
     truncated: bool,
+    /// Relevance per id, in the same order and of the same length as `ids`, or
+    /// empty when this connector answered a set rather than a ranking.
+    ///
+    /// Empty is a real answer, not a missing one. A connector that matches
+    /// exactly — equality on a column — has no relevance to report, and inventing
+    /// one so the field is never empty would make "1.0" mean both "certain" and
+    /// "unscored". `ranked()` is how a caller tells the difference.
+    ///
+    /// This is the field whose absence made every connector refuse to rank:
+    /// `.lexical` and `.similar` were expressible in a plan and had nowhere to
+    /// put an answer, so both backends declared the capability false and meant
+    /// it.
+    scores: []f32 = &.{},
+
+    /// Whether `ids` is ordered by relevance rather than by discovery.
+    pub fn ranked(self: Result) bool {
+        return self.scores.len != 0;
+    }
 
     pub fn deinit(self: *Result, allocator: std.mem.Allocator) void {
         allocator.free(self.ids);
+        if (self.scores.len != 0) allocator.free(self.scores);
         self.* = undefined;
     }
 };

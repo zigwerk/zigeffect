@@ -11,10 +11,13 @@
 //! rather than a scan, and the connector declares the capability because it
 //! performs it — not because the underlying store theoretically could.
 //!
-//! Deliberately not ranking yet. `Plan.Result` is `{ids, scanned, truncated}`
-//! with nowhere to put a score, so this answers *which* nodes match and leaves
-//! *how well* to the rank clause the IR does not have. Returning an arbitrary
-//! order and calling it relevance would be worse than returning a set.
+//! It ranks when asked to. `Plan.Result` gained a `scores` array, so a
+//! `.lexical` predicate now returns ids ordered by relevance — inverse document
+//! frequency weighted by which field the term hit, which is what distinguishes
+//! two nodes that both contain every term.
+//!
+//! `vector_search` stays false: similarity is an ordering over a probe, and this
+//! connector has no way to receive one that the IR can express.
 
 const std = @import("std");
 const model = @import("model.zig");
@@ -23,9 +26,9 @@ const zgroach = @import("zgroach");
 
 /// What this connector can answer, and nothing more.
 ///
-/// `vector_search` is false even though the store holds an embedding per node,
-/// for the same reason the CockroachDB connector says false: similarity is an
-/// ordering and `Plan.Result` carries no order.
+/// `vector_search` is false even though the store holds an embedding per node:
+/// a similarity query needs a probe vector, and nothing in the plan carries one
+/// that this connector could compare against.
 pub const capabilities = zgroach.Backend.Capabilities{
     .predicates = true,
     .text_search = true,
@@ -51,6 +54,50 @@ pub const RepositoryBackend = struct {
         return self.run(allocator, plan);
     }
 
+    /// How well `node` answers the ranking predicates, by summed inverse
+    /// document frequency.
+    ///
+    /// A term present in most of the corpus separates nothing, so it should not
+    /// lift a result above one that matched something rare. Same smoothing as
+    /// the ranking in `search.zig` — `ln(1 + N/df)` rather than `ln(N/df)`, which
+    /// is exactly zero for a term in every node and would score a whole answer
+    /// at zero for a query made of common words.
+    fn relevance(self: *RepositoryBackend, node: *const model.Node, predicates: []const zgroach.Plan.Predicate) f32 {
+        const index = self.graph.topology.findNodeIndex(node.id) orelse return 0;
+        const total: f32 = @floatFromInt(@max(self.graph.nodeCount(), 1));
+        var score: f32 = 0;
+        for (predicates) |predicate| {
+            const phrase = switch (predicate.match) {
+                .lexical => |value| value,
+                else => continue,
+            };
+            var tokenizer = nendb.Tokenizer.init(phrase);
+            while (tokenizer.next()) |token| {
+                const postings = self.graph.lexicalPostings(nendb.tokenHash(token));
+                if (postings.len == 0) continue;
+                const idf = @log(1.0 + total / @as(f32, @floatFromInt(postings.len)));
+
+                // Where the term hit, not merely that it did. Every node that
+                // survives `matches` contains every term, so an IDF sum alone is
+                // identical for all of them and orders nothing — a score has to
+                // read something about *this* node to rank it.
+                var best: f32 = 0;
+                for (postings) |posting| {
+                    if (posting.node_index != index) continue;
+                    const field_weight: f32 = switch (posting.field) {
+                        .label => 1.0,
+                        .path => 0.8,
+                        .search_text => 0.65,
+                    };
+                    const frequency = @min(@as(f32, 1.2), 1.0 + 0.05 * @as(f32, @floatFromInt(posting.frequency - 1)));
+                    best = @max(best, field_weight * frequency);
+                }
+                score += idf * best;
+            }
+        }
+        return score;
+    }
+
     fn run(self: *RepositoryBackend, allocator: std.mem.Allocator, plan: zgroach.Plan.Plan) !zgroach.Plan.Result {
         var ids: std.ArrayList(u64) = .empty;
         errdefer ids.deinit(allocator);
@@ -63,6 +110,10 @@ pub const RepositoryBackend = struct {
                 if (self.graph.findNode(id)) |node| try ids.append(allocator, node.id);
             },
             .matching => |predicates| {
+                const ranking = ranksAny(predicates);
+                var scores: std.ArrayList(f32) = .empty;
+                defer scores.deinit(allocator);
+
                 for (0..self.graph.nodeCount()) |index| {
                     if (scanned >= plan.scan_limit) {
                         truncated = true;
@@ -76,6 +127,17 @@ pub const RepositoryBackend = struct {
                         break;
                     }
                     try ids.append(allocator, node.id);
+                    if (ranking) try scores.append(allocator, self.relevance(node, predicates));
+                }
+
+                if (ranking) {
+                    sortByScore(ids.items, scores.items);
+                    return .{
+                        .ids = try ids.toOwnedSlice(allocator),
+                        .scores = try scores.toOwnedSlice(allocator),
+                        .scanned = scanned,
+                        .truncated = truncated,
+                    };
                 }
             },
         }
@@ -87,6 +149,32 @@ pub const RepositoryBackend = struct {
         };
     }
 };
+
+/// Whether any predicate asks for a ranking rather than a comparison.
+fn ranksAny(predicates: []const zgroach.Plan.Predicate) bool {
+    for (predicates) |predicate| if (predicate.match.ranks()) return true;
+    return false;
+}
+
+/// Order ids by descending score, carrying the scores with them.
+///
+/// An insertion sort because `limit` defaults to 256 and is capped well below
+/// where anything cleverer pays for itself; the two arrays move together so a
+/// score can never end up beside the wrong id.
+fn sortByScore(ids: []u64, scores: []f32) void {
+    var i: usize = 1;
+    while (i < ids.len) : (i += 1) {
+        const id = ids[i];
+        const score = scores[i];
+        var j = i;
+        while (j > 0 and scores[j - 1] < score) : (j -= 1) {
+            ids[j] = ids[j - 1];
+            scores[j] = scores[j - 1];
+        }
+        ids[j] = id;
+        scores[j] = score;
+    }
+}
 
 fn matchesAll(graph: *const model.RepositoryGraph, node: *const model.Node, predicates: []const zgroach.Plan.Predicate) bool {
     for (predicates) |predicate| {
