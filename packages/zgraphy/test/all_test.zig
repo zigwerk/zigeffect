@@ -1209,6 +1209,49 @@ test "zgraphy renders no byte from an indexed repository that could steer a term
     try std.testing.expect(std.mem.indexOfScalar(u8, encoded, '\n') == null);
 }
 
+test "zgraphy graph index round-trips facts and refuses a mismatched source" {
+    var graph = try zgraphy.RepositoryGraph.init(std.testing.allocator, .{});
+    defer graph.deinit();
+    const handler = try graph.addSearchableNode(.symbol, "PaymentHandler", "src/payment.zig", 10, "process card payment authorization");
+    const repository = try graph.addSearchableNode(.symbol, "PaymentRepository", "src/repository.zig", 8, "persist transaction records");
+    try graph.addEdge(.{ .from = handler, .to = repository, .relation = .calls, .provenance = .extracted });
+
+    const digest: [32]u8 = @splat(7);
+    const encoded = try zgraphy.GraphIndex.encodeAlloc(std.testing.allocator, &graph, digest);
+    defer std.testing.allocator.free(encoded);
+
+    var restored = try zgraphy.GraphIndex.decode(std.testing.allocator, encoded, digest, .{});
+    defer restored.deinit();
+
+    // The facts survive.
+    try std.testing.expectEqual(graph.nodeCount(), restored.nodeCount());
+    try std.testing.expectEqual(graph.edges.items.len, restored.edges.items.len);
+
+    // And so does everything derived from them, which is the whole reason this
+    // is safe: the index stores no postings, no vectors and no adjacency, so
+    // they cannot drift — addNode rebuilds them exactly as a real build does.
+    const original = try zgraphy.Freshness.fingerprint(std.testing.allocator, &graph);
+    const rebuilt = try zgraphy.Freshness.fingerprint(std.testing.allocator, &restored);
+    try std.testing.expectEqualSlices(u8, &original, &rebuilt);
+
+    var results = try zgraphy.Search.queryAlloc(std.testing.allocator, &restored, "card payment", .{ .limit = 2 });
+    defer results.deinit();
+    try std.testing.expectEqual(handler, results.items[0].node_id);
+    try std.testing.expect(results.items[0].vector_score > 0);
+
+    // An index describing a different snapshot must fail over, not answer.
+    const other: [32]u8 = @splat(9);
+    try std.testing.expectError(
+        zgraphy.GraphIndex.Error.IndexUnusable,
+        zgraphy.GraphIndex.decode(std.testing.allocator, encoded, other, .{}),
+    );
+    // So must a truncated one.
+    try std.testing.expectError(
+        zgraphy.GraphIndex.Error.IndexUnusable,
+        zgraphy.GraphIndex.decode(std.testing.allocator, encoded[0 .. encoded.len - 9], digest, .{}),
+    );
+}
+
 test "zgraphy does not let a hub donate its score to everything it touches" {
     var graph = try zgraphy.RepositoryGraph.init(std.testing.allocator, .{});
     defer graph.deinit();

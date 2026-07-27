@@ -4,6 +4,7 @@ pub const Nendb = @import("nendb.zig");
 pub const Store = @import("store.zig");
 pub const Indexer = @import("indexer.zig");
 pub const Search = @import("search.zig");
+pub const GraphIndex = @import("graph_index.zig");
 pub const Sanitize = @import("sanitize.zig");
 pub const Project = @import("project.zig");
 pub const ZigEffectBridge = @import("zigeffect_bridge.zig");
