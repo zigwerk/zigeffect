@@ -2597,7 +2597,7 @@ test "zgraphy M0 security baseline is pinned complete and evidence honest" {
     try std.testing.expectEqual(@as(usize, 0), summary.unowned_high_or_critical);
     const digest = zgraphy.SecurityBaseline.catalogDigest();
     const digest_hex = std.fmt.bytesToHex(digest, .lower);
-    try std.testing.expectEqualStrings("5cf030049fb9f9ce93e20b3efe78820de690f41edf91bd97e526b14dd7dc6412", &digest_hex);
+    try std.testing.expectEqualStrings("c24caeaae611336324cf453e49f7e21a2adfd75670e342655083d43ca539a28a", &digest_hex);
 
     const original_id = parsed.value.threats[1].id;
     parsed.value.threats[1].id = parsed.value.threats[0].id;
@@ -2897,9 +2897,11 @@ test "zgraphy M1 workspace ownership assigns every safe file to the deepest expl
     defer evidence.deinit();
     const assertions = zstd.Testing.AssertionRecorder.init(&evidence);
 
-    var fixture = try std.Io.Dir.cwd().openDir(std.testing.io, "test/fixtures/universal-discovery", .{ .iterate = true, .follow_symlinks = false });
-    defer fixture.close(std.testing.io);
-    var discovered = try zgraphy.Discovery.scan(std.testing.allocator, std.testing.io, fixture, .{
+    var fixture = std.testing.tmpDir(.{ .iterate = true });
+    defer fixture.cleanup();
+    try copyUniversalDiscoveryFixture(std.testing.allocator, std.testing.io, fixture.dir);
+    try fixture.dir.writeFile(std.testing.io, .{ .sub_path = "vendor/linked/.git", .data = "gitdir: /redacted/external/worktree\n" });
+    var discovered = try zgraphy.Discovery.scan(std.testing.allocator, std.testing.io, fixture.dir, .{
         .repository_id = "repo-0123456789abcdef0123456789abcdef",
         .max_entries = 256,
         .max_files = 128,
@@ -2908,7 +2910,7 @@ test "zgraphy M1 workspace ownership assigns every safe file to the deepest expl
         .max_depth = 24,
     });
     defer discovered.deinit();
-    var ownership = try zgraphy.Ownership.analyze(std.testing.allocator, std.testing.io, fixture, &discovered, .{});
+    var ownership = try zgraphy.Ownership.analyze(std.testing.allocator, std.testing.io, fixture.dir, &discovered, .{});
     defer ownership.deinit();
     try zgraphy.Ownership.validate(&discovered, &ownership);
     const placed_files = discovered.summary.deeply_indexed + discovered.summary.placed_unsupported + discovered.summary.placed_asset;
@@ -2935,7 +2937,7 @@ test "zgraphy M1 workspace ownership assigns every safe file to the deepest expl
     const app_file_id = zgraphy.stableId(.file, "frontend/app.ts", "app.ts");
     try std.testing.expect(graph.hasEdge(app_file_id, app.id, .owned_by));
 
-    var built = try zgraphy.Indexer.buildRepository(std.testing.allocator, std.testing.io, fixture, .{});
+    var built = try zgraphy.Indexer.buildRepository(std.testing.allocator, std.testing.io, fixture.dir, .{});
     defer built.deinit();
     try std.testing.expectEqual(placed_files, built.summary.ownership.assignments);
     const built_app = built.graph.findNodeByLabel("web-console") orelse return error.MissingBuiltApplicationNode;
@@ -7305,6 +7307,40 @@ fn copyFullstackOrdersFixture(allocator: std.mem.Allocator, io: std.Io, destinat
         "frontend/src/ordersClient.ts",
         "proto/orders/v1/orders.proto",
     }) |path| try copyFullstackOrdersFile(allocator, io, destination, path);
+}
+
+fn copyUniversalDiscoveryFixture(allocator: std.mem.Allocator, io: std.Io, destination: std.Io.Dir) !void {
+    for (&[_][]const u8{
+        ".gitignore",
+        "build.zig.zon",
+        "config/settings.yaml",
+        "crates/core/Cargo.toml",
+        "crates/core/src/lib.rs",
+        "docs/README.md",
+        "frontend/.gitignore",
+        "frontend/app.ts",
+        "frontend/generated/drop.ts",
+        "frontend/generated/keep.ts",
+        "frontend/package.json",
+        "go/cmd/main.go",
+        "go/go.mod",
+        "ignored/skip.ts",
+        "proto/buf.yaml",
+        "proto/order.proto",
+        "secrets/private-key.pem",
+        "services/pyproject.toml",
+        "services/worker.py",
+        "src/main.zig",
+        "unknown/data.weird",
+        "vendor/linked/README.txt",
+    }) |path| {
+        const source_path = try std.fmt.allocPrint(allocator, "test/fixtures/universal-discovery/{s}", .{path});
+        defer allocator.free(source_path);
+        const bytes = try std.Io.Dir.cwd().readFileAlloc(io, source_path, allocator, .limited(1024 * 1024));
+        defer allocator.free(bytes);
+        if (std.fs.path.dirname(path)) |parent| try destination.createDirPath(io, parent);
+        try destination.writeFile(io, .{ .sub_path = path, .data = bytes });
+    }
 }
 
 fn copyFullstackOrdersFile(allocator: std.mem.Allocator, io: std.Io, destination: std.Io.Dir, path: []const u8) !void {

@@ -15,7 +15,7 @@ trap 'rm -rf "$output"' EXIT
 
 "$packager" 0.1.0 "$output"
 
-for package in zigeffect zigeffect-std zigeffect-postgres; do
+for package in zigeffect zigeffect-std zigeffect-postgres zgdb zgroach zgraphy zigeffect-cli; do
   asset="$output/${package}-0.1.0.tar.gz"
   test -f "$asset"
   grep -q "^${package}-0.1.0.tar.gz"$'\t' "$output/manifest.tsv"
@@ -32,6 +32,30 @@ if grep -q '\.path = "\.\./zigeffect"' "$zon"; then
   exit 1
 fi
 grep -q 'https://github.com/zigwerk/zigeffect/releases/download/v0.1.0/zigeffect-0.1.0.tar.gz' "$zon"
+
+cli_expanded="$output/cli-expanded"
+mkdir -p "$cli_expanded"
+tar -xzf "$output/zigeffect-cli-0.1.0.tar.gz" -C "$cli_expanded"
+catalog="$(find "$cli_expanded" -name release_catalog.zig -type f -print -quit)"
+test -n "$catalog"
+grep -q 'pub const cli_version = "0.1.0";' "$cli_expanded/zigeffect-cli-0.1.0/src/distribution.zig"
+grep -q 'pub const embedded = zstd.Project.DependencyRelease' "$catalog"
+grep -q 'zgraphy-0.1.0.tar.gz' "$catalog"
+grep -q 'zigeffect-std-0.1.0.tar.gz' "$catalog"
+if grep -q '0.0.0-development' "$catalog"; then
+  echo "published CLI retained the development release catalog" >&2
+  exit 1
+fi
+
+zgraphy_expanded="$output/zgraphy-expanded"
+mkdir -p "$zgraphy_expanded"
+tar -xzf "$output/zgraphy-0.1.0.tar.gz" -C "$zgraphy_expanded"
+zgraphy_zon="$(find "$zgraphy_expanded" -name build.zig.zon -type f -maxdepth 2 -print -quit)"
+test -n "$zgraphy_zon"
+if grep -q '\.path = "\.\./' "$zgraphy_zon"; then
+  echo "published zgraphy package retained a monorepo path dependency" >&2
+  exit 1
+fi
 
 expected="$(awk -F '\t' '$1 == "zigeffect-std-0.1.0.tar.gz" { print $2 }' "$output/manifest.tsv")"
 actual="$(cd "$root/packages/zigeffect" && zig fetch "$output/zigeffect-std-0.1.0.tar.gz")"

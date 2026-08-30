@@ -27,10 +27,12 @@ packages=(
   zigeffect
   zigeffect-std
   zigeffect-zio
-  zigeffect-cli
   zigeffect-http
   zigeffect-otel
   zigeffect-parser
+  zgdb
+  zgroach
+  zgraphy
   zigeffect-postgres-libpq
   zigeffect-postgres
   zigeffect-quic
@@ -41,6 +43,7 @@ packages=(
   zigeffect-http-tls-openssl
   zigeffect-storage-postgres
   zigeffect-reference-system
+  zigeffect-cli
 )
 
 sha256_file() {
@@ -82,11 +85,35 @@ for package in "${packages[@]}"; do
     dependency_url="https://github.com/zigwerk/zigeffect/releases/download/v${version}/${dependency_asset}"
     DEP_PATH="../$dependency" DEP_URL="$dependency_url" DEP_HASH="$dependency_hash" \
       perl -0pi -e 's{\.path = "\Q$ENV{DEP_PATH}\E"}{.url = "$ENV{DEP_URL}", .hash = "$ENV{DEP_HASH}"}g' "$staged_zon"
-  done < <(grep -oE '\.path = "\.\./zigeffect[^"]*"' "$zon" | sed -E 's/.*"\.\.\/([^"]+)"/\1/' || true)
+  done < <(grep -oE '\.path = "\.\./[^"]+"' "$zon" | sed -E 's/.*"\.\.\/([^"]+)"/\1/' || true)
 
-  if grep -q '\.path = "\.\./zigeffect' "$staged_zon"; then
+  if grep -q '\.path = "\.\./' "$staged_zon"; then
     echo "unresolved monorepo dependency in $package" >&2
     exit 1
+  fi
+
+  if [[ "$package" == "zigeffect-cli" ]]; then
+    CLI_VERSION="$version" perl -0pi -e 's{pub const cli_version = "[^"]+";}{pub const cli_version = "$ENV{CLI_VERSION}";}' "$stage/src/distribution.zig"
+    catalog="$stage/src/release_catalog.zig"
+    {
+      echo 'const zstd = @import("zigeffect_std");'
+      echo
+      echo 'pub const embedded = zstd.Project.DependencyRelease{'
+      printf '    .version = "%s",\n' "$version"
+      echo '    .packages = &.{'
+      while IFS=$'\t' read -r dependency_asset dependency_hash dependency_sha256; do
+        dependency_name="${dependency_asset%-${version}.tar.gz}"
+        dependency_url="https://github.com/zigwerk/zigeffect/releases/download/v${version}/${dependency_asset}"
+        printf '        .{ .name = "%s", .url = "%s", .hash = "%s", .sha256 = "%s" },\n' \
+          "$dependency_name" "$dependency_url" "$dependency_hash" "$dependency_sha256"
+      done < "$manifest"
+      echo '    },'
+      echo '};'
+      echo
+      echo 'pub fn available() bool {'
+      echo '    return embedded.packages.len != 0;'
+      echo '}'
+    } > "$catalog"
   fi
 
   asset="$output/${package}-${version}.tar.gz"

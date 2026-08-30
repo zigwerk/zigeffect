@@ -29,6 +29,49 @@ distribution boundaries, not separately maintained source trees.
 Consumers such as Ziac pin released ZigEffect packages and the released CLI.
 They must not copy ZigEffect source or depend on a sibling checkout.
 
+## Install The CLI
+
+ZigEffect requires Zig `>= 0.16.0` and `< 0.17.0`. Install the latest verified
+CLI source release without cloning the monorepo:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/zigwerk/zigeffect/main/install.sh | sh
+```
+
+The installer verifies the release checksum, builds the CLI in `ReleaseSafe`,
+and writes `zigeffect` to `$HOME/.local/bin`. Override the version or prefix
+without `sudo`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/zigwerk/zigeffect/main/install.sh | \
+  ZIGEFFECT_VERSION=0.1.1 ZIGEFFECT_INSTALL_DIR="$HOME/bin" sh
+```
+
+Create a standalone application pinned to immutable ZigEffect release
+packages:
+
+```sh
+zigeffect create hello-effects
+cd hello-effects
+zig build test
+zig build run
+```
+
+Use `--kind service`, `library`, `package`, or `system` for other project
+shapes. A system starts as an independently buildable service monorepo.
+
+Adopt an existing repository or monorepo without replacing application files:
+
+```sh
+cd my-existing-repo
+zigeffect init my-workspace
+```
+
+`init` installs the shared workspace manifest and ZigEffect skills for Codex,
+Claude Code, and Gemini. It discovers any nested `zigeffect.project.json`, so a
+monorepo can begin with one project and split into independently checked
+projects later.
+
 ## Repository
 
 - [`packages/zigeffect`](packages/zigeffect): runtime kernel, workflows,
@@ -42,12 +85,15 @@ They must not copy ZigEffect source or depend on a sibling checkout.
 - [`packages/zigeffect-postgres`](packages/zigeffect-postgres): Postgres effects
 - [`packages/zigeffect-reference-system`](packages/zigeffect-reference-system):
   complete reference application
+- [`packages/zgdb`](packages/zgdb), [`packages/zgroach`](packages/zgroach), and
+  [`packages/zgraphy`](packages/zgraphy): embedded graph storage, query planning,
+  and agent-facing repository intelligence
 - [`apps/zigeffect-site`](apps/zigeffect-site): project website
 
 Additional packages provide OpenTelemetry, Redis, S3, QUIC, parser, storage and
 transport integrations.
 
-## Start Here
+## Develop The Monorepo
 
 ZigEffect currently targets Zig 0.16.0.
 

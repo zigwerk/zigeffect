@@ -3,6 +3,7 @@ pub const zstd = @import("zigeffect_std");
 const templates = @import("templates.zig");
 pub const safety = @import("safety_command.zig");
 pub const distribution = @import("distribution.zig");
+pub const release_catalog = @import("release_catalog.zig");
 
 pub const version = distribution.cli_version;
 
@@ -26,9 +27,12 @@ pub const CliError = error{
     InvalidFault,
     MissingScenario,
     MissingFilter,
+    ReleaseCatalogUnavailable,
+    ManagedFileConflict,
 };
 
 pub const ScaffoldProfile = enum { @"local-fake", @"integration-real", production };
+pub const ScaffoldDependencyMode = zstd.Project.DependencyMode;
 pub const ScaffoldOptions = struct {
     kind: zstd.Project.ProjectKind,
     name: []const u8,
@@ -39,6 +43,16 @@ pub const ScaffoldOptions = struct {
     json: bool = false,
     force: bool = false,
     profile: ScaffoldProfile = .@"local-fake",
+    dependency_mode: ScaffoldDependencyMode = .path,
+    release: ?zstd.Project.DependencyRelease = null,
+};
+
+pub const WorkspaceInitOptions = struct {
+    name: []const u8 = "workspace",
+    root: []const u8 = ".",
+    dry_run: bool = false,
+    json: bool = false,
+    force: bool = false,
 };
 
 pub const Action = union(enum) {
@@ -51,6 +65,8 @@ pub const Action = union(enum) {
     statechart: StatechartOptions,
     @"test": TestOptions,
     new: ScaffoldOptions,
+    create: ScaffoldOptions,
+    init: WorkspaceInitOptions,
     project: ProjectOptions,
     safety: SafetyOptions,
     agent: AgentOptions,
@@ -194,6 +210,8 @@ pub fn parseArgs(args: []const []const u8) (CliError || zstd.Project.ProjectErro
     if (eql(args[0], "benchmark")) return .{ .benchmark = try parseBenchmarkArgs(args[1..]) };
     if (eql(args[0], "add")) return .{ .add = try parseAddArgs(args[1..]) };
     if (eql(args[0], "generate")) return .{ .generate = try parseGenerateArgs(args[1..]) };
+    if (eql(args[0], "create")) return .{ .create = try parseCreateArgs(args[1..]) };
+    if (eql(args[0], "init")) return .{ .init = try parseInitArgs(args[1..]) };
     if (!eql(args[0], "new")) return error.UnknownCommand;
     if (args.len < 2) return error.MissingScaffoldKind;
     if (args.len < 3) return error.MissingProjectName;
@@ -253,11 +271,110 @@ pub fn parseArgs(args: []const []const u8) (CliError || zstd.Project.ProjectErro
     return .{ .new = options };
 }
 
+fn parseCreateArgs(args: []const []const u8) (CliError || zstd.Project.ProjectError)!ScaffoldOptions {
+    if (args.len == 0 or std.mem.startsWith(u8, args[0], "--")) return error.MissingProjectName;
+    try zstd.Project.validateIdentifier(args[0]);
+    var options = ScaffoldOptions{
+        .kind = .application,
+        .name = args[0],
+        .target = args[0],
+        .dependency_mode = .release,
+        .release = if (release_catalog.available()) release_catalog.embedded else null,
+    };
+    var kind_set = false;
+    var target_set = false;
+    var profile_set = false;
+    var index: usize = 1;
+    while (index < args.len) {
+        const token = args[index];
+        if (eql(token, "--dry-run")) {
+            if (options.dry_run) return error.DuplicateOption;
+            options.dry_run = true;
+            index += 1;
+        } else if (eql(token, "--json")) {
+            if (options.json) return error.DuplicateOption;
+            options.json = true;
+            index += 1;
+        } else if (eql(token, "--force")) {
+            if (options.force) return error.DuplicateOption;
+            options.force = true;
+            index += 1;
+        } else if (eql(token, "--kind")) {
+            if (kind_set) return error.DuplicateOption;
+            options.kind = parseKind(try optionValue(args, &index)) orelse return error.UnknownScaffoldKind;
+            kind_set = true;
+        } else if (eql(token, "--target")) {
+            if (target_set) return error.DuplicateOption;
+            options.target = try optionValue(args, &index);
+            target_set = true;
+        } else if (eql(token, "--profile")) {
+            if (profile_set) return error.DuplicateOption;
+            options.profile = std.meta.stringToEnum(ScaffoldProfile, try optionValue(args, &index)) orelse return error.UnknownOption;
+            profile_set = true;
+        } else {
+            return error.UnknownOption;
+        }
+    }
+    try validateTarget(options.target);
+    return options;
+}
+
+fn parseInitArgs(args: []const []const u8) (CliError || zstd.Project.ProjectError)!WorkspaceInitOptions {
+    var options = WorkspaceInitOptions{};
+    var root_set = false;
+    var name_set = false;
+    var index: usize = 0;
+    if (args.len != 0 and !std.mem.startsWith(u8, args[0], "--")) {
+        try zstd.Project.validateIdentifier(args[0]);
+        options.name = args[0];
+        name_set = true;
+        index = 1;
+    }
+    while (index < args.len) {
+        const token = args[index];
+        if (eql(token, "--root")) {
+            if (root_set) return error.DuplicateOption;
+            options.root = try optionValue(args, &index);
+            root_set = true;
+        } else if (eql(token, "--dry-run")) {
+            if (options.dry_run) return error.DuplicateOption;
+            options.dry_run = true;
+            index += 1;
+        } else if (eql(token, "--json")) {
+            if (options.json) return error.DuplicateOption;
+            options.json = true;
+            index += 1;
+        } else if (eql(token, "--force")) {
+            if (options.force) return error.DuplicateOption;
+            options.force = true;
+            index += 1;
+        } else if (!name_set and !std.mem.startsWith(u8, token, "--")) {
+            try zstd.Project.validateIdentifier(token);
+            options.name = token;
+            name_set = true;
+            index += 1;
+        } else {
+            return error.UnknownOption;
+        }
+    }
+    try validateTarget(options.root);
+    return options;
+}
+
 pub fn generatePlan(allocator: std.mem.Allocator, options: ScaffoldOptions) !zstd.Project.FilePlan {
     try zstd.Project.validateIdentifier(options.name);
     try validateTarget(options.target);
-    try zstd.Project.validateDependencyPath(options.zigeffect_path);
-    try zstd.Project.validateDependencyPath(options.zigeffect_std_path);
+    switch (options.dependency_mode) {
+        .path => {
+            if (options.release != null) return error.InvalidDependencyRelease;
+            try zstd.Project.validateDependencyPath(options.zigeffect_path);
+            try zstd.Project.validateDependencyPath(options.zigeffect_std_path);
+        },
+        .release => {
+            const release = options.release orelse return error.ReleaseCatalogUnavailable;
+            try release.validate();
+        },
+    }
 
     var plan = zstd.Project.FilePlan.init(allocator);
     errdefer plan.deinit();
@@ -272,6 +389,40 @@ pub fn generatePlan(allocator: std.mem.Allocator, options: ScaffoldOptions) !zst
     try addManifest(&plan, options);
     try plan.sort();
     try distribution.addScaffoldMetadata(&plan, options.name, options.kind);
+    try plan.sort();
+    return plan;
+}
+
+pub fn generateWorkspacePlan(allocator: std.mem.Allocator, options: WorkspaceInitOptions) !zstd.Project.FilePlan {
+    try zstd.Project.validateIdentifier(options.name);
+    try validateTarget(options.root);
+    var plan = zstd.Project.FilePlan.init(allocator);
+    errdefer plan.deinit();
+
+    const workspace_manifest = try std.json.Stringify.valueAlloc(allocator, .{
+        .schema = "zigeffect.workspace.v1",
+        .name = options.name,
+        .discovery = .{
+            .include = &.{"**/zigeffect.project.json"},
+            .exclude = &.{ ".git/**", "node_modules/**", "zig-out/**", ".zig-cache/**", "**/zig-out/**", "**/.zig-cache/**" },
+        },
+    }, .{ .whitespace = .indent_2 });
+    defer allocator.free(workspace_manifest);
+    try plan.add("zigeffect.workspace.json", workspace_manifest);
+
+    const tooling = try std.json.Stringify.valueAlloc(allocator, .{
+        .schema = "zigeffect.workspace-tooling.v1",
+        .cli_version = version,
+        .dependency_release = if (release_catalog.available()) release_catalog.embedded.version else "development",
+        .project_manifest = "zigeffect.project.json",
+        .recursive = true,
+    }, .{ .whitespace = .indent_2 });
+    defer allocator.free(tooling);
+    try plan.add(".zigeffect/workspace.json", tooling);
+    try plan.add(".zigeffect/.gitignore", "graph/\nreceipts/\nsessions/\ntests/\nworkbench.json\n");
+    try plan.add(".agents/skills/zigeffect-development/SKILL.md", templates.skill);
+    try plan.add(".claude/skills/zigeffect-development/SKILL.md", templates.skill);
+    try plan.add(".gemini/skills/zigeffect-development/SKILL.md", templates.skill);
     try plan.sort();
     return plan;
 }
@@ -336,29 +487,70 @@ pub fn runAllocWithEnvironment(
         .benchmark => |options| return runBenchmarkAlloc(allocator, io, base_dir, options),
         .add => |options| return runAddAlloc(allocator, io, base_dir, options),
         .generate => |options| return runGenerateAlloc(allocator, io, base_dir, options),
-        .new => |options| {
-            var plan = try generatePlan(allocator, options);
-            defer plan.deinit();
-            const write_result = writePlan(io, base_dir, options.target, plan, .{
-                .dry_run = options.dry_run,
-                .force = options.force,
-            }) catch |err| {
-                const output = try formatScaffoldOutput(allocator, options, plan, .refused, 0, 0, @errorName(err));
-                return .{ .allocator = allocator, .exit_code = if (err == error.TargetNotEmpty) 3 else 1, .output = output };
-            };
-            const status: zstd.Project.ScaffoldStatus = if (options.dry_run) .planned else .created;
-            const output = try formatScaffoldOutput(
-                allocator,
-                options,
-                plan,
-                status,
-                write_result.written,
-                write_result.replaced,
-                if (options.dry_run) "dry run" else "scaffold written",
-            );
-            return .{ .allocator = allocator, .exit_code = 0, .output = output };
-        },
+        .new, .create => |options| return runScaffoldAlloc(allocator, io, base_dir, options),
+        .init => |options| return runWorkspaceInitAlloc(allocator, io, base_dir, options),
     }
+}
+
+fn runScaffoldAlloc(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    base_dir: std.Io.Dir,
+    options: ScaffoldOptions,
+) !RunResult {
+    var plan = try generatePlan(allocator, options);
+    defer plan.deinit();
+    const write_result = writePlan(io, base_dir, options.target, plan, .{
+        .dry_run = options.dry_run,
+        .force = options.force,
+    }) catch |err| {
+        const output = try formatScaffoldOutput(allocator, options, plan, .refused, 0, 0, @errorName(err));
+        return .{ .allocator = allocator, .exit_code = if (err == error.TargetNotEmpty) 3 else 1, .output = output };
+    };
+    const status: zstd.Project.ScaffoldStatus = if (options.dry_run) .planned else .created;
+    const output = try formatScaffoldOutput(
+        allocator,
+        options,
+        plan,
+        status,
+        write_result.written,
+        write_result.replaced,
+        if (options.dry_run) "dry run" else "scaffold written",
+    );
+    return .{ .allocator = allocator, .exit_code = 0, .output = output };
+}
+
+fn runWorkspaceInitAlloc(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    base_dir: std.Io.Dir,
+    options: WorkspaceInitOptions,
+) !RunResult {
+    var plan = try generateWorkspacePlan(allocator, options);
+    defer plan.deinit();
+    const write_result = writeManagedPlan(io, base_dir, options.root, plan, .{
+        .dry_run = options.dry_run,
+        .force = options.force,
+    }) catch |err| {
+        return .{
+            .allocator = allocator,
+            .exit_code = if (err == error.ManagedFileConflict) 3 else 1,
+            .output = try formatWorkspaceInitOutput(allocator, options, plan, "refused", 0, 0, @errorName(err)),
+        };
+    };
+    return .{
+        .allocator = allocator,
+        .exit_code = 0,
+        .output = try formatWorkspaceInitOutput(
+            allocator,
+            options,
+            plan,
+            if (options.dry_run) "planned" else "initialized",
+            write_result.written,
+            write_result.replaced,
+            if (options.dry_run) "dry run" else "workspace tooling written",
+        ),
+    };
 }
 
 pub fn writePlan(
@@ -413,6 +605,70 @@ pub fn writePlan(
         };
     }
     return .{ .planned = plan.files.items.len, .written = plan.files.items.len, .replaced = replaced };
+}
+
+pub fn writeManagedPlan(
+    io: std.Io,
+    base_dir: std.Io.Dir,
+    target: []const u8,
+    plan: zstd.Project.FilePlan,
+    options: WriteOptions,
+) !WriteResult {
+    try validateTarget(target);
+    if (options.dry_run) return .{ .planned = plan.files.items.len, .written = 0, .replaced = 0 };
+    var target_dir = openTargetDir(io, base_dir, target) catch |err| switch (err) {
+        error.FileNotFound => null,
+        else => return err,
+    };
+    defer if (target_dir) |*dir| dir.close(io);
+
+    var pending = zstd.Project.FilePlan.init(plan.allocator);
+    defer pending.deinit();
+    for (plan.files.items) |generated| {
+        const existing = if (target_dir) |dir|
+            try readOptionalFileAlloc(plan.allocator, io, dir, generated.path, 4 * 1024 * 1024)
+        else
+            null;
+        defer if (existing) |bytes| plan.allocator.free(bytes);
+        if (existing) |bytes| {
+            if (std.mem.eql(u8, bytes, generated.content)) continue;
+            if (!options.force) return error.ManagedFileConflict;
+        }
+        try pending.add(generated.path, generated.content);
+    }
+    if (pending.files.items.len == 0) return .{ .planned = plan.files.items.len, .written = 0, .replaced = 0 };
+    return writePlan(io, base_dir, target, pending, .{ .force = true });
+}
+
+fn formatWorkspaceInitOutput(
+    allocator: std.mem.Allocator,
+    options: WorkspaceInitOptions,
+    plan: zstd.Project.FilePlan,
+    status: []const u8,
+    written: usize,
+    replaced: usize,
+    detail: []const u8,
+) ![]u8 {
+    const safe_root = try zstd.Secrets.redactAlloc(allocator, options.root);
+    defer allocator.free(safe_root);
+    const safe_detail = try zstd.Secrets.redactAlloc(allocator, detail);
+    defer allocator.free(safe_detail);
+    if (options.json) return std.json.Stringify.valueAlloc(allocator, .{
+        .schema = "zigeffect.workspace-init-receipt.v1",
+        .workspace = options.name,
+        .root = safe_root,
+        .status = status,
+        .planned = plan.files.items.len,
+        .written = written,
+        .replaced = replaced,
+        .detail = safe_detail,
+    }, .{});
+
+    return std.fmt.allocPrint(
+        allocator,
+        "{s} workspace {s} at {s}: {s}\nplanned={d} written={d} replaced={d}\n",
+        .{ status, options.name, safe_root, safe_detail, plan.files.items.len, written, replaced },
+    );
 }
 
 const UpgradeAction = enum { create, update, unchanged, conflict, migrate };
@@ -798,6 +1054,8 @@ fn runUpgradeAlloc(
         .target = ".",
         .zigeffect_path = manifest.parsed.value.dependencies.zigeffect,
         .zigeffect_std_path = manifest.parsed.value.dependencies.zigeffect_std,
+        .dependency_mode = manifest.parsed.value.dependencies.mode,
+        .release = manifest.parsed.value.dependencies.release,
     });
     defer expected.deinit();
     const expected_state_file = findGeneratedFile(expected, distribution.scaffold_state_path) orelse return error.MissingScaffoldState;
@@ -2201,9 +2459,15 @@ fn runAddAlloc(
     updated.components = components;
     try updated.validate();
 
-    const adjusted_core = try pathFromComponentAlloc(allocator, component_path, parsed.value.dependencies.zigeffect);
+    const adjusted_core = if (parsed.value.dependencies.mode == .path)
+        try pathFromComponentAlloc(allocator, component_path, parsed.value.dependencies.zigeffect)
+    else
+        try allocator.dupe(u8, parsed.value.dependencies.zigeffect);
     defer allocator.free(adjusted_core);
-    const adjusted_std = try pathFromComponentAlloc(allocator, component_path, parsed.value.dependencies.zigeffect_std);
+    const adjusted_std = if (parsed.value.dependencies.mode == .path)
+        try pathFromComponentAlloc(allocator, component_path, parsed.value.dependencies.zigeffect_std)
+    else
+        try allocator.dupe(u8, parsed.value.dependencies.zigeffect_std);
     defer allocator.free(adjusted_std);
     var nested = try generatePlan(allocator, .{
         .kind = addProjectKind(options.kind),
@@ -2211,6 +2475,8 @@ fn runAddAlloc(
         .target = options.name,
         .zigeffect_path = adjusted_core,
         .zigeffect_std_path = adjusted_std,
+        .dependency_mode = parsed.value.dependencies.mode,
+        .release = parsed.value.dependencies.release,
     });
     defer nested.deinit();
     var plan = zstd.Project.FilePlan.init(allocator);
@@ -2590,6 +2856,38 @@ fn openTargetDir(io: std.Io, base_dir: std.Io.Dir, target: []const u8) !std.Io.D
         base_dir.openDir(io, target, options);
 }
 
+fn dependencySpecAlloc(
+    allocator: std.mem.Allocator,
+    options: ScaffoldOptions,
+    package_name: []const u8,
+    local_path: []const u8,
+) ![]u8 {
+    return switch (options.dependency_mode) {
+        .path => std.fmt.allocPrint(allocator, ".path = \"{s}\"", .{local_path}),
+        .release => release: {
+            const catalog = options.release orelse return error.ReleaseCatalogUnavailable;
+            const pin = catalog.package(package_name) orelse return error.InvalidDependencyRelease;
+            break :release std.fmt.allocPrint(
+                allocator,
+                ".url = \"{s}\", .hash = \"{s}\"",
+                .{ pin.url, pin.hash },
+            );
+        },
+    };
+}
+
+fn dependencyLineAlloc(
+    allocator: std.mem.Allocator,
+    options: ScaffoldOptions,
+    field_name: []const u8,
+    package_name: []const u8,
+    local_path: []const u8,
+) ![]u8 {
+    const spec = try dependencySpecAlloc(allocator, options, package_name, local_path);
+    defer allocator.free(spec);
+    return std.fmt.allocPrint(allocator, "        .{s} = .{{ {s} }},", .{ field_name, spec });
+}
+
 pub fn helpText() []const u8 {
     return
     \\zigeffect - local agent-first Zig application development
@@ -2628,6 +2926,8 @@ pub fn helpText() []const u8 {
     \\  zigeffect test gaps [--requirement <id>] [--component <id>] [--json]
     \\  zigeffect test stress [--scenario <id>] [--runs <1..256>] [--seed <n>] [--json]
     \\  zigeffect test history [--json]
+    \\  zigeffect init [name] [--root <path>] [--dry-run] [--json] [--force]
+    \\  zigeffect create <name> [--kind <application|service|library|package|system>] [options]
     \\  zigeffect new <application|service|library|package|system> <name> [options]
     \\  zigeffect add <service|library|package> <name> [options]
     \\  zigeffect generate <service|layer|schema|cli|http|sql|statechart|statechart_actor|durable_statechart|statechart_test|test> <name> --component <id> [options]
@@ -2644,6 +2944,7 @@ pub fn helpText() []const u8 {
     \\  zigeffect benchmark run --provider <id> --command <manifest-id> [--root <path>]
     \\
     \\Options:
+    \\  --kind <kind>                project kind for create (defaults to application)
     \\  --target <path>               output directory (defaults to name)
     \\  --zigeffect-path <path>       manifest path to zigeffect
     \\  --zigeffect-std-path <path>   build and manifest path to zigeffect-std
@@ -2674,6 +2975,8 @@ fn addExecutableProject(
     else
         try pathFromComponentAlloc(allocator, prefix, options.zigeffect_std_path);
     defer allocator.free(std_path);
+    const std_dependency = try dependencySpecAlloc(allocator, options, "zigeffect-std", std_path);
+    defer allocator.free(std_dependency);
     const component_name = if (prefix.len == 0) options.name else componentNameFromPrefix(prefix);
     const real_profile = options.profile != .@"local-fake";
     const http_path = if (real_profile) try siblingAdapterPathAlloc(allocator, std_path, "zigeffect-http") else try allocator.dupe(u8, "");
@@ -2682,14 +2985,26 @@ fn addExecutableProject(
     defer allocator.free(postgres_path);
     const otel_path = if (real_profile) try siblingAdapterPathAlloc(allocator, std_path, "zigeffect-otel") else try allocator.dupe(u8, "");
     defer allocator.free(otel_path);
-    const adapter_zon = if (real_profile) try std.fmt.allocPrint(allocator, "        .zigeffect_http = .{{ .path = \"{s}\" }},\n        .zigeffect_postgres_libpq = .{{ .path = \"{s}\" }},\n        .zigeffect_otel = .{{ .path = \"{s}\" }},", .{ http_path, postgres_path, otel_path }) else try allocator.dupe(u8, "");
+    const adapter_zon = if (real_profile) adapter_zon: {
+        const http_spec = try dependencySpecAlloc(allocator, options, "zigeffect-http", http_path);
+        defer allocator.free(http_spec);
+        const postgres_spec = try dependencySpecAlloc(allocator, options, "zigeffect-postgres-libpq", postgres_path);
+        defer allocator.free(postgres_spec);
+        const otel_spec = try dependencySpecAlloc(allocator, options, "zigeffect-otel", otel_path);
+        defer allocator.free(otel_spec);
+        break :adapter_zon try std.fmt.allocPrint(
+            allocator,
+            "        .zigeffect_http = .{{ {s} }},\n        .zigeffect_postgres_libpq = .{{ {s} }},\n        .zigeffect_otel = .{{ {s} }},",
+            .{ http_spec, postgres_spec, otel_spec },
+        );
+    } else try allocator.dupe(u8, "");
     defer allocator.free(adapter_zon);
     // Resolved the same way the adapters are: a sibling of zigeffect-std. There
     // is no separate option because there is no case where a project wants the
     // standard library from one checkout and the graph from another.
     const zgraphy_path = try siblingAdapterPathAlloc(allocator, std_path, "zgraphy");
     defer allocator.free(zgraphy_path);
-    const graph_zon = try std.fmt.allocPrint(allocator, "        .zgraphy = .{{ .path = \"{s}\" }},", .{zgraphy_path});
+    const graph_zon = try dependencyLineAlloc(allocator, options, "zgraphy", "zgraphy", zgraphy_path);
     defer allocator.free(graph_zon);
 
     try addRenderedAt(plan, prefix, "build.zig", templates.executable_build, &.{
@@ -2702,7 +3017,7 @@ fn addExecutableProject(
     try addRenderedAt(plan, prefix, "build.zig.zon", templates.executable_zon, &.{
         .{ "__ZIG_NAME__", package_name },
         .{ "__FINGERPRINT__", fingerprint },
-        .{ "__STD_PATH__", std_path },
+        .{ "__STD_DEPENDENCY__", std_dependency },
         .{ "__GRAPH_ZON_DEPENDENCY__", graph_zon },
         .{ "__ADAPTER_ZON_DEPENDENCIES__", adapter_zon },
         .{ "__SHARED_ZON_DEPENDENCY__", if (with_shared) "        .shared = .{ .path = \"../../packages/shared\" }," else "" },
@@ -2798,6 +3113,8 @@ fn addLibraryProject(
     else
         try pathFromComponentAlloc(allocator, prefix, options.zigeffect_std_path);
     defer allocator.free(std_path);
+    const std_dependency = try dependencySpecAlloc(allocator, options, "zigeffect-std", std_path);
+    defer allocator.free(std_dependency);
     const component_name = if (prefix.len == 0) options.name else componentNameFromPrefix(prefix);
 
     try addRenderedAt(plan, prefix, "build.zig", templates.library_build, &.{
@@ -2807,7 +3124,7 @@ fn addLibraryProject(
     try addRenderedAt(plan, prefix, "build.zig.zon", templates.executable_zon, &.{
         .{ "__ZIG_NAME__", package_name },
         .{ "__FINGERPRINT__", fingerprint },
-        .{ "__STD_PATH__", std_path },
+        .{ "__STD_DEPENDENCY__", std_dependency },
         // A library gets no graph dependency: `library_build` has no wiring for
         // one, and an unused entry in the manifest is a fetch every consumer
         // pays for nothing.
@@ -2829,11 +3146,13 @@ fn addSystemProject(plan: *zstd.Project.FilePlan, options: ScaffoldOptions) !voi
     defer allocator.free(package_name);
     const fingerprint = try fingerprintAlloc(allocator, package_name);
     defer allocator.free(fingerprint);
+    const std_dependency = try dependencySpecAlloc(allocator, options, "zigeffect-std", options.zigeffect_std_path);
+    defer allocator.free(std_dependency);
     try addRenderedAt(plan, "", "build.zig", templates.system_build, &.{.{ "__PROJECT_NAME__", options.name }});
     try addRenderedAt(plan, "", "build.zig.zon", templates.system_zon, &.{
         .{ "__ZIG_NAME__", package_name },
         .{ "__FINGERPRINT__", fingerprint },
-        .{ "__STD_PATH__", options.zigeffect_std_path },
+        .{ "__STD_DEPENDENCY__", std_dependency },
     });
     try addRenderedAt(plan, "", "src/root.zig", if (options.profile == .@"local-fake") templates.system_source else templates.production_system_source, &.{});
     try addRenderedAt(plan, "", "test/root_test.zig", if (options.profile == .@"local-fake") templates.system_test else templates.production_system_test, &.{.{ "__PROJECT_NAME__", options.name }});
@@ -2969,8 +3288,10 @@ fn addManifest(plan: *zstd.Project.FilePlan, options: ScaffoldOptions) !void {
             },
         },
         .dependencies = .{
-            .zigeffect = options.zigeffect_path,
-            .zigeffect_std = options.zigeffect_std_path,
+            .mode = options.dependency_mode,
+            .zigeffect = if (options.dependency_mode == .release) "zigeffect" else options.zigeffect_path,
+            .zigeffect_std = if (options.dependency_mode == .release) "zigeffect-std" else options.zigeffect_std_path,
+            .release = options.release,
         },
     };
     const json = try manifest.jsonAlloc(plan.allocator);
@@ -3699,6 +4020,18 @@ test "CLI parses help version and every new scaffold kind" {
     try std.testing.expect(upgrade.upgrade.dry_run);
     try std.testing.expect(!upgrade.upgrade.apply);
 
+    const create = try parseArgs(&.{ "create", "demo-project", "--kind", "system", "--target", "platform", "--profile", "production", "--dry-run", "--json" });
+    try std.testing.expectEqual(zstd.Project.ProjectKind.system, create.create.kind);
+    try std.testing.expectEqualStrings("demo-project", create.create.name);
+    try std.testing.expectEqualStrings("platform", create.create.target);
+    try std.testing.expectEqual(ScaffoldDependencyMode.release, create.create.dependency_mode);
+
+    const init = try parseArgs(&.{ "init", "demo-workspace", "--root", "platform", "--dry-run", "--json" });
+    try std.testing.expectEqualStrings("demo-workspace", init.init.name);
+    try std.testing.expectEqualStrings("platform", init.init.root);
+    try std.testing.expect(init.init.dry_run);
+    try std.testing.expect(init.init.json);
+
     const cases = [_]struct {
         token: []const u8,
         kind: zstd.Project.ProjectKind,
@@ -4235,6 +4568,47 @@ test "generator emits deterministic valid manifests skills and safe common files
     }
 }
 
+test "release generator emits immutable package pins without sibling paths" {
+    const release = zstd.Project.DependencyRelease{
+        .version = "0.2.0",
+        .packages = &.{
+            .{ .name = "zigeffect", .url = "https://github.com/zigwerk/zigeffect/releases/download/v0.2.0/zigeffect-0.2.0.tar.gz", .hash = "zigeffect-0.2.0-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", .sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" },
+            .{ .name = "zigeffect-std", .url = "https://github.com/zigwerk/zigeffect/releases/download/v0.2.0/zigeffect-std-0.2.0.tar.gz", .hash = "zigeffect_std-0.2.0-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB", .sha256 = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789" },
+            .{ .name = "zgraphy", .url = "https://github.com/zigwerk/zigeffect/releases/download/v0.2.0/zgraphy-0.2.0.tar.gz", .hash = "zgraphy-0.2.0-CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC", .sha256 = "1111111111111111111111111111111111111111111111111111111111111111" },
+        },
+    };
+    var plan = try generatePlan(std.testing.allocator, .{
+        .kind = .application,
+        .name = "release-app",
+        .target = "release-app",
+        .dependency_mode = .release,
+        .release = release,
+    });
+    defer plan.deinit();
+
+    const zon = plan.find("build.zig.zon").?.content;
+    try std.testing.expect(std.mem.indexOf(u8, zon, ".path = \"../zigeffect-std\"") == null);
+    try std.testing.expect(std.mem.indexOf(u8, zon, "zigeffect-std-0.2.0.tar.gz") != null);
+    try std.testing.expect(std.mem.indexOf(u8, zon, "zgraphy-0.2.0.tar.gz") != null);
+
+    var manifest = try zstd.Project.parseManifest(std.testing.allocator, plan.find("zigeffect.project.json").?.content);
+    defer manifest.deinit();
+    try std.testing.expectEqual(zstd.Project.DependencyMode.release, manifest.value.dependencies.mode);
+    try std.testing.expectEqualStrings("0.2.0", manifest.value.dependencies.release.?.version);
+}
+
+test "workspace init plans agent tooling without application source" {
+    var plan = try generateWorkspacePlan(std.testing.allocator, .{ .name = "demo-workspace", .root = "." });
+    defer plan.deinit();
+    try std.testing.expect(plan.find("zigeffect.workspace.json") != null);
+    try std.testing.expect(plan.find(".zigeffect/workspace.json") != null);
+    try std.testing.expect(plan.find(".agents/skills/zigeffect-development/SKILL.md") != null);
+    try std.testing.expect(plan.find(".claude/skills/zigeffect-development/SKILL.md") != null);
+    try std.testing.expect(plan.find(".gemini/skills/zigeffect-development/SKILL.md") != null);
+    try std.testing.expect(plan.find("src/main.zig") == null);
+    try std.testing.expect(plan.find("build.zig") == null);
+}
+
 test "application and service plans wire every production boundary" {
     for ([_]zstd.Project.ProjectKind{ .application, .service }) |kind| {
         var plan = try generatePlan(std.testing.allocator, .{
@@ -4676,6 +5050,34 @@ test "statechart commands query only the manifest-owned artifact catalog" {
     var exported = try runAlloc(std.testing.allocator, std.testing.io, tmp.dir, &.{ "statechart", "export", "agent.review", "--format", "mermaid", "--root", "statechart-project" });
     defer exported.deinit();
     try std.testing.expectEqualStrings("stateDiagram-v2", exported.output);
+}
+
+test "workspace init preserves unrelated files is idempotent and refuses managed conflicts" {
+    var tmp = std.testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "README.md", .data = "existing project\n" });
+
+    var initialized = try runAlloc(std.testing.allocator, std.testing.io, tmp.dir, &.{ "init", "demo-workspace", "--json" });
+    defer initialized.deinit();
+    try std.testing.expectEqual(@as(u8, 0), initialized.exit_code);
+    const readme = try tmp.dir.readFileAlloc(std.testing.io, "README.md", std.testing.allocator, .limited(1024));
+    defer std.testing.allocator.free(readme);
+    try std.testing.expectEqualStrings("existing project\n", readme);
+    try tmp.dir.access(std.testing.io, "zigeffect.workspace.json", .{});
+
+    var repeated = try runAlloc(std.testing.allocator, std.testing.io, tmp.dir, &.{ "init", "demo-workspace", "--json" });
+    defer repeated.deinit();
+    try std.testing.expectEqual(@as(u8, 0), repeated.exit_code);
+    var repeated_receipt = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, repeated.output, .{});
+    defer repeated_receipt.deinit();
+    try std.testing.expectEqual(@as(i64, 0), repeated_receipt.value.object.get("written").?.integer);
+    try std.testing.expectEqual(@as(i64, 0), repeated_receipt.value.object.get("replaced").?.integer);
+
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "zigeffect.workspace.json", .data = "user edit\n" });
+    var refused = try runAlloc(std.testing.allocator, std.testing.io, tmp.dir, &.{ "init", "demo-workspace", "--json" });
+    defer refused.deinit();
+    try std.testing.expectEqual(@as(u8, 3), refused.exit_code);
+    try std.testing.expect(std.mem.indexOf(u8, refused.output, "ManagedFileConflict") != null);
 }
 
 test "writer dry run creates nothing and default mode refuses a non-empty target" {

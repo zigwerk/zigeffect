@@ -6,11 +6,11 @@
     "version": "0.9.17",
     "commit": "cb96bdaa0c367bec8d5c5aee5d7c9ebb727e9780",
     "references": [
-      {"id":"graphify-security-policy","path":"packages/references/graphify/SECURITY.md","sha256":"86233f572529cfff536a5a6b0c9a6f01e0a4351d04bceef53a0defeb55b6c442","line_start":28,"line_end":43},
-      {"id":"graphify-security-module","path":"packages/references/graphify/graphify/security.py","sha256":"26effec8aec27935da8cb60ee060924aa1a1965644a4c9f7dd61f4ae6b90a516","line_start":23,"line_end":444},
-      {"id":"graphify-llm-boundary","path":"packages/references/graphify/graphify/llm.py","sha256":"cd31353cc3b7fffdaa14e8a31e454170fcd1f3649e54b03e8edccf24e0ff59b5","line_start":27,"line_end":520},
-      {"id":"graphify-detector","path":"packages/references/graphify/graphify/detect.py","sha256":"874462d00b76612f56acdc5ca8b9e92d99494d7a97964b0bc88cabde61800eda","line_start":1200,"line_end":1208},
-      {"id":"graphify-security-tests","path":"packages/references/graphify/tests/test_security.py","sha256":"c2c0b9071068b554e944656c72bcfe0e025224058ac271ec0ae8d1d7b0cc3bf1","line_start":1,"line_end":464}
+      {"id":"graphify-security-policy","path":"test/fixtures/references/graphify/SECURITY.md","sha256":"86233f572529cfff536a5a6b0c9a6f01e0a4351d04bceef53a0defeb55b6c442","line_start":28,"line_end":43},
+      {"id":"graphify-security-module","path":"test/fixtures/references/graphify/graphify/security.py","sha256":"26effec8aec27935da8cb60ee060924aa1a1965644a4c9f7dd61f4ae6b90a516","line_start":23,"line_end":444},
+      {"id":"graphify-llm-boundary","path":"test/fixtures/references/graphify/graphify/llm.py","sha256":"cd31353cc3b7fffdaa14e8a31e454170fcd1f3649e54b03e8edccf24e0ff59b5","line_start":27,"line_end":520},
+      {"id":"graphify-detector","path":"test/fixtures/references/graphify/graphify/detect.py","sha256":"874462d00b76612f56acdc5ca8b9e92d99494d7a97964b0bc88cabde61800eda","line_start":1200,"line_end":1208},
+      {"id":"graphify-security-tests","path":"test/fixtures/references/graphify/tests/test_security.py","sha256":"c2c0b9071068b554e944656c72bcfe0e025224058ac271ec0ae8d1d7b0cc3bf1","line_start":1,"line_end":464}
     ]
   },
   "boundaries": ["repository_content","filesystem","configuration_authority","parser_converter","persistence_migration","provider_external","agent_output","runtime_causal","export_integration"],

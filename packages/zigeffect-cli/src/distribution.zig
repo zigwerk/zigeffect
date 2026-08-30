@@ -156,7 +156,7 @@ pub fn completionScript(shell: Shell) []const u8 {
         .bash =>
         \\# zigeffect bash completion
         \\_zigeffect_complete() {
-        \\  local commands="new add generate graph statechart test project safety agent benchmark compatibility upgrade completions help version"
+        \\  local commands="init create new add generate graph statechart test project safety agent benchmark compatibility upgrade completions help version"
         \\  local kinds="application service library package system"
         \\  if [[ ${COMP_CWORD} -eq 1 ]]; then COMPREPLY=( $(compgen -W "$commands" -- "${COMP_WORDS[COMP_CWORD]}") ); return; fi
         \\  if [[ ${COMP_WORDS[1]} == new && ${COMP_CWORD} -eq 2 ]]; then COMPREPLY=( $(compgen -W "$kinds" -- "${COMP_WORDS[COMP_CWORD]}") ); return; fi
@@ -169,7 +169,7 @@ pub fn completionScript(shell: Shell) []const u8 {
         \\#compdef zigeffect
         \\_zigeffect() {
         \\  local -a commands
-        \\  commands=(new add generate graph statechart test project safety agent benchmark compatibility upgrade completions help version)
+        \\  commands=(init create new add generate graph statechart test project safety agent benchmark compatibility upgrade completions help version)
         \\  if (( CURRENT == 2 )); then _describe 'command' commands; return; fi
         \\  _arguments '*:argument:->args'
         \\}
@@ -179,7 +179,8 @@ pub fn completionScript(shell: Shell) []const u8 {
         .fish =>
         \\# zigeffect fish completion
         \\complete -c zigeffect -f
-        \\complete -c zigeffect -n '__fish_use_subcommand' -a 'new add generate graph statechart test project safety agent benchmark compatibility upgrade completions help version'
+        \\complete -c zigeffect -n '__fish_use_subcommand' -a 'init create new add generate graph statechart test project safety agent benchmark compatibility upgrade completions help version'
+        \\complete -c zigeffect -n '__fish_seen_subcommand_from create' -l kind -a 'application service library package system'
         \\complete -c zigeffect -n '__fish_seen_subcommand_from new' -a 'application service library package system'
         \\complete -c zigeffect -l root -r
         \\complete -c zigeffect -l json

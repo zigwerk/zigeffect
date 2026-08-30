@@ -60,7 +60,7 @@ pub const executable_zon =
     \\    .minimum_zig_version = "0.16.0",
     \\    .fingerprint = 0x__FINGERPRINT__,
     \\    .dependencies = .{
-    \\        .zigeffect_std = .{ .path = "__STD_PATH__" },
+    \\        .zigeffect_std = .{ __STD_DEPENDENCY__ },
     \\__GRAPH_ZON_DEPENDENCY__
     \\__ADAPTER_ZON_DEPENDENCIES__
     \\__SHARED_ZON_DEPENDENCY__
@@ -816,7 +816,7 @@ pub const system_zon =
     \\        .api = .{ .path = "services/api" },
     \\        .worker = .{ .path = "services/worker" },
     \\        .shared = .{ .path = "packages/shared" },
-    \\        .zigeffect_std = .{ .path = "__STD_PATH__" },
+    \\        .zigeffect_std = .{ __STD_DEPENDENCY__ },
     \\    },
     \\    .paths = .{ "build.zig", "build.zig.zon", "README.md", "src", "test" },
     \\}

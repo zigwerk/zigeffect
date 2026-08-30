@@ -46,6 +46,8 @@ pub const ProjectError = error{
     DuplicateAdapterProfile,
     DuplicateAdapterBinding,
     IncompleteProductionProfile,
+    InvalidDependencyRelease,
+    DuplicateDependencyPackage,
 };
 
 pub const ProjectKind = enum {
@@ -364,9 +366,109 @@ pub const ArtifactPaths = struct {
     statecharts: []const u8 = ".zigeffect/statecharts",
 };
 
+pub const DependencyMode = enum { path, release };
+
+pub const DependencyPackage = struct {
+    name: []const u8,
+    url: []const u8,
+    hash: []const u8,
+    sha256: []const u8,
+
+    pub fn validate(self: DependencyPackage, version: []const u8) ProjectError!void {
+        if (!validDependencyPackageName(self.name)) return error.InvalidDependencyRelease;
+        try ensureSafe(self.name);
+        try ensureSafe(self.url);
+        try ensureSafe(self.hash);
+        try ensureSafe(self.sha256);
+
+        var expected_url_buffer: [512]u8 = undefined;
+        const expected_url = std.fmt.bufPrint(
+            &expected_url_buffer,
+            "https://github.com/zigwerk/zigeffect/releases/download/v{s}/{s}-{s}.tar.gz",
+            .{ version, self.name, version },
+        ) catch return error.InvalidDependencyRelease;
+        if (!std.mem.eql(u8, self.url, expected_url)) return error.InvalidDependencyRelease;
+
+        var version_marker_buffer: [96]u8 = undefined;
+        const version_marker = std.fmt.bufPrint(&version_marker_buffer, "-{s}-", .{version}) catch return error.InvalidDependencyRelease;
+        if (self.hash.len < 32 or self.hash.len > 192 or std.mem.indexOf(u8, self.hash, version_marker) == null) {
+            return error.InvalidDependencyRelease;
+        }
+        if (self.sha256.len != 64) return error.InvalidDependencyRelease;
+        for (self.sha256) |byte| if (!std.ascii.isHex(byte)) return error.InvalidDependencyRelease;
+    }
+};
+
+pub const DependencyRelease = struct {
+    version: []const u8,
+    packages: []const DependencyPackage,
+
+    pub fn validate(self: DependencyRelease) ProjectError!void {
+        if (!isSemanticVersion(self.version) or self.packages.len == 0) return error.InvalidDependencyRelease;
+        try ensureSafe(self.version);
+        for (self.packages, 0..) |dependency_package, index| {
+            try dependency_package.validate(self.version);
+            for (self.packages[0..index]) |previous| {
+                if (std.mem.eql(u8, previous.name, dependency_package.name)) return error.DuplicateDependencyPackage;
+            }
+        }
+        if (self.package("zigeffect") == null or self.package("zigeffect-std") == null) {
+            return error.InvalidDependencyRelease;
+        }
+    }
+
+    pub fn package(self: DependencyRelease, name: []const u8) ?DependencyPackage {
+        for (self.packages) |candidate| {
+            if (std.mem.eql(u8, candidate.name, name)) return candidate;
+        }
+        return null;
+    }
+};
+
 pub const DependencyPaths = struct {
+    mode: DependencyMode = .path,
     zigeffect: []const u8 = "../zigeffect",
     zigeffect_std: []const u8 = "../zigeffect-std",
+    release: ?DependencyRelease = null,
+
+    pub fn validate(self: DependencyPaths) ProjectError!void {
+        switch (self.mode) {
+            .path => {
+                if (self.release != null) return error.InvalidDependencyRelease;
+                try validateDependencyPath(self.zigeffect);
+                try validateDependencyPath(self.zigeffect_std);
+            },
+            .release => {
+                const release = self.release orelse return error.InvalidDependencyRelease;
+                if (!std.mem.eql(u8, self.zigeffect, "zigeffect") or
+                    !std.mem.eql(u8, self.zigeffect_std, "zigeffect-std"))
+                {
+                    return error.InvalidDependencyRelease;
+                }
+                try release.validate();
+            },
+        }
+    }
+
+    pub fn package(self: DependencyPaths, name: []const u8) ?DependencyPackage {
+        const release = self.release orelse return null;
+        return release.package(name);
+    }
+
+    pub fn jsonStringify(self: DependencyPaths, writer: anytype) !void {
+        switch (self.mode) {
+            .path => try writer.write(.{
+                .zigeffect = self.zigeffect,
+                .zigeffect_std = self.zigeffect_std,
+            }),
+            .release => try writer.write(.{
+                .mode = self.mode,
+                .zigeffect = self.zigeffect,
+                .zigeffect_std = self.zigeffect_std,
+                .release = self.release,
+            }),
+        }
+    }
 };
 
 pub const Manifest = struct {
@@ -583,8 +685,7 @@ pub const Manifest = struct {
         try validateRelativePath(self.artifacts.receipts, false);
         try validateRelativePath(self.artifacts.graph, false);
         try validateRelativePath(self.artifacts.statecharts, false);
-        try validateDependencyPath(self.dependencies.zigeffect);
-        try validateDependencyPath(self.dependencies.zigeffect_std);
+        try self.dependencies.validate();
         try self.safety.validate(self);
     }
 
@@ -929,6 +1030,15 @@ pub fn validateDependencyPath(path: []const u8) ProjectError!void {
     try ensureSafe(path);
 }
 
+fn validDependencyPackageName(value: []const u8) bool {
+    if (value.len == 0 or value.len > 96) return false;
+    for (value) |byte| {
+        if (std.ascii.isLower(byte) or std.ascii.isDigit(byte) or byte == '-') continue;
+        return false;
+    }
+    return true;
+}
+
 fn componentKindToProject(kind: ComponentKind) ProjectKind {
     return switch (kind) {
         .application => .application,
@@ -1196,6 +1306,89 @@ test "Project parser fails closed for unknown fields and unsafe dependency locat
     };
     try std.testing.expectError(error.InvalidPath, absolute_dependency.validate());
     try validateDependencyPath("../../../packages/zigeffect");
+}
+
+test "Project dependency releases round trip immutable Zigwerk package pins" {
+    const dependencies = DependencyPaths{
+        .mode = .release,
+        .zigeffect = "zigeffect",
+        .zigeffect_std = "zigeffect-std",
+        .release = .{
+            .version = "0.2.0",
+            .packages = &.{
+                .{
+                    .name = "zigeffect",
+                    .url = "https://github.com/zigwerk/zigeffect/releases/download/v0.2.0/zigeffect-0.2.0.tar.gz",
+                    .hash = "zigeffect-0.2.0-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                    .sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                },
+                .{
+                    .name = "zigeffect-std",
+                    .url = "https://github.com/zigwerk/zigeffect/releases/download/v0.2.0/zigeffect-std-0.2.0.tar.gz",
+                    .hash = "zigeffect_std-0.2.0-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+                    .sha256 = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+                },
+            },
+        },
+    };
+    const manifest = Manifest{
+        .name = "demo-app",
+        .kind = .application,
+        .components = &.{.{ .id = "demo-app", .kind = .application, .path = "." }},
+        .dependencies = dependencies,
+    };
+    try manifest.validate();
+    const core = manifest.dependencies.package("zigeffect").?;
+    try std.testing.expectEqualStrings("zigeffect-0.2.0-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", core.hash);
+
+    const json = try manifest.jsonAlloc(std.testing.allocator);
+    defer std.testing.allocator.free(json);
+    var parsed = try parseManifest(std.testing.allocator, json);
+    defer parsed.deinit();
+    try std.testing.expectEqual(DependencyMode.release, parsed.value.dependencies.mode);
+    try std.testing.expectEqualStrings("0.2.0", parsed.value.dependencies.release.?.version);
+}
+
+test "Project dependency releases reject mixed mutable and incomplete sources" {
+    const component = &.{Component{ .id = "demo-app", .kind = .application, .path = "." }};
+    const missing_catalog = Manifest{
+        .name = "demo-app",
+        .kind = .application,
+        .components = component,
+        .dependencies = .{ .mode = .release, .zigeffect = "zigeffect", .zigeffect_std = "zigeffect-std" },
+    };
+    try std.testing.expectError(error.InvalidDependencyRelease, missing_catalog.validate());
+
+    const mutable_url = Manifest{
+        .name = "demo-app",
+        .kind = .application,
+        .components = component,
+        .dependencies = .{
+            .mode = .release,
+            .zigeffect = "zigeffect",
+            .zigeffect_std = "zigeffect-std",
+            .release = .{
+                .version = "0.2.0",
+                .packages = &.{.{
+                    .name = "zigeffect",
+                    .url = "https://github.com/zigwerk/zigeffect/archive/main.tar.gz",
+                    .hash = "zigeffect-0.2.0-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                    .sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                }},
+            },
+        },
+    };
+    try std.testing.expectError(error.InvalidDependencyRelease, mutable_url.validate());
+
+    const mixed = Manifest{
+        .name = "demo-app",
+        .kind = .application,
+        .components = component,
+        .dependencies = .{
+            .release = .{ .version = "0.2.0", .packages = &.{} },
+        },
+    };
+    try std.testing.expectError(error.InvalidDependencyRelease, mixed.validate());
 }
 
 test "Project file plans own content sort deterministically and reject collisions" {

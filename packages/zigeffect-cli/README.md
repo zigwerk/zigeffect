@@ -6,7 +6,15 @@ another tool under the core engine's `tools/` directory.
 
 ## Install And Completions
 
-The supported local toolchain is Zig `>= 0.16.0` and `< 0.17.0`:
+The supported local toolchain is Zig `>= 0.16.0` and `< 0.17.0`. Install a
+released CLI from the repository root documentation:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/zigwerk/zigeffect/main/install.sh | sh
+zigeffect --version
+```
+
+For development inside the source monorepo:
 
 ```sh
 zig build test
@@ -33,6 +41,18 @@ package are also tested independently.
 
 ## Generate
 
+The public standalone experience is:
+
+```sh
+zigeffect create my-app
+zigeffect create payments --kind service
+zigeffect create platform --kind system
+```
+
+`create` pins generated projects to immutable package URLs and hashes embedded
+in the released CLI. `new` is the lower-level contributor command for explicit
+local source paths:
+
 ```sh
 zig build run -- new application my-app \
   --target ../../my-app \
@@ -46,6 +66,17 @@ for a stable receipt. Existing non-empty targets are refused by default.
 `--force` replaces only paths declared by the plan and preserves unrelated
 files. Files are written through sibling temporary files and renamed into
 place.
+
+Adopt an existing repository without generating source or build files:
+
+```sh
+zigeffect init my-workspace
+```
+
+The resulting `zigeffect.workspace.json` discovers nested project manifests and
+installs the same ZigEffect development skill for Codex, Claude Code, and
+Gemini. Unrelated repository files are preserved; conflicting managed tooling
+files require an explicit `--force`.
 
 Generated applications and services include typed Config/Schema and CLI
 boundaries, local HTTP and SQL fakes, an effect-native service and layer,

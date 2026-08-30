@@ -25,10 +25,40 @@ jobs:
           version: ${{ env.ZIG_VERSION }}
       - name: Verify deterministic consumer archives
         run: scripts/test_package_release.sh
+      - name: Verify source installer
+        run: scripts/test_install.sh
       - name: Verify tool and Testing v2 hygiene
         run: |
           packages/zigeffect/tools/check_tool_hygiene.sh
           packages/zigeffect/scripts/check_testing_v2_migration.sh
+
+  bootstrap:
+    name: CLI bootstrap
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2.2.1
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - name: Verify project metadata and CLI
+        run: |
+          (cd packages/zigeffect-std && zig build test)
+          (cd packages/zigeffect-cli && zig build test)
+          (cd packages/zigeffect-cli && zig build integration-test)
+
+  graph-packages:
+    name: graph packages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2.2.1
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - name: Verify graph package boundary
+        run: |
+          (cd packages/zgdb && zig build test)
+          (cd packages/zgroach && zig build test)
+          (cd packages/zgraphy && zig build test)
 
   core:
     name: native core

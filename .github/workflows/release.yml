@@ -35,7 +35,9 @@ jobs:
           echo "VERSION=$version" >> "$GITHUB_ENV"
           echo "TAG=v$version" >> "$GITHUB_ENV"
       - name: Test package release boundary
-        run: scripts/test_package_release.sh
+        run: |
+          scripts/test_package_release.sh
+          scripts/test_install.sh
       - name: Build release packages
         run: scripts/package_release.sh "$VERSION" dist/release
       - name: Publish GitHub release
@@ -44,3 +46,14 @@ jobs:
         run: |
           gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "ZigEffect $TAG" --generate-notes
           gh release upload "$TAG" dist/release/* --clobber
+      - name: Verify public install and standalone scaffold
+        shell: bash
+        run: |
+          install_root="$RUNNER_TEMP/zigeffect-install"
+          project_root="$RUNNER_TEMP/zigeffect-consumer"
+          ZIGEFFECT_VERSION="$VERSION" ZIGEFFECT_INSTALL_DIR="$install_root" sh install.sh
+          cd "$RUNNER_TEMP"
+          "$install_root/bin/zigeffect" create zigeffect-consumer
+          test "$("$install_root/bin/zigeffect" --version)" = "zigeffect $VERSION"
+          cd "$project_root"
+          zig build test

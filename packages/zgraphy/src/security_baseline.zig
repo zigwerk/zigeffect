@@ -193,10 +193,8 @@ pub fn validateEvidencePaths(
     package_root: std.Io.Dir,
     contract: *const Contract,
 ) !void {
-    var repository_root = try package_root.openDir(io, "../..", .{ .follow_symlinks = false });
-    defer repository_root.close(io);
     for (contract.graphify.references) |reference| {
-        const bytes = try repository_root.readFileAlloc(io, reference.path, allocator, .limited(8 * 1024 * 1024));
+        const bytes = try package_root.readFileAlloc(io, reference.path, allocator, .limited(8 * 1024 * 1024));
         defer allocator.free(bytes);
         var digest: [32]u8 = @splat(0);
         std.crypto.hash.sha2.Sha256.hash(bytes, &digest, .{});
@@ -219,7 +217,7 @@ fn validateGraphify(graphify: *const GraphifyBaseline) !void {
     for (graphify.references, 0..) |reference, index| {
         for (graphify.references[0..index]) |previous| if (std.mem.eql(u8, previous.id, reference.id)) return error.DuplicateSecurityReference;
         if (!std.mem.eql(u8, reference.id, required_reference_ids[index]) or
-            !std.mem.startsWith(u8, reference.path, "packages/references/graphify/") or
+            !std.mem.startsWith(u8, reference.path, "test/fixtures/references/graphify/") or
             !validSha256(reference.sha256) or reference.line_start == 0 or reference.line_end < reference.line_start)
         {
             return error.InvalidSecurityReference;
