@@ -96,7 +96,7 @@ jobs:
         run: |
           mkdir -p .zigeffect/ci
           printf '{"schema":"zigeffect.ci-failure-handoff.v1","status":"failed","os":"%s","optimize":"%s","shard":"%s","run_id":"%s","repair_hint":"replay the named shard command and inspect the first Testing v2 assertion causal id"}\n' '${{ matrix.os }}' '${{ matrix.optimize }}' '${{ matrix.shard }}' '${{ github.run_id }}' > .zigeffect/ci/handoff.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: native-failure-${{ matrix.os }}-${{ matrix.optimize }}-${{ matrix.shard }}
@@ -159,7 +159,7 @@ jobs:
       - name: Validate production manifest and receipt digests
         working-directory: packages/zigeffect-cli
         run: zig build run -- project validate --root ../zigeffect-reference-system --json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: production-live-evidence-${{ github.run_id }}-${{ github.run_attempt }}
