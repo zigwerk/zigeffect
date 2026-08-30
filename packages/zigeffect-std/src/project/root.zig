@@ -389,11 +389,7 @@ pub const DependencyPackage = struct {
         ) catch return error.InvalidDependencyRelease;
         if (!std.mem.eql(u8, self.url, expected_url)) return error.InvalidDependencyRelease;
 
-        var version_marker_buffer: [96]u8 = undefined;
-        const version_marker = std.fmt.bufPrint(&version_marker_buffer, "-{s}-", .{version}) catch return error.InvalidDependencyRelease;
-        if (self.hash.len < 32 or self.hash.len > 192 or std.mem.indexOf(u8, self.hash, version_marker) == null) {
-            return error.InvalidDependencyRelease;
-        }
+        if (!validZigPackageHash(self.hash)) return error.InvalidDependencyRelease;
         if (self.sha256.len != 64) return error.InvalidDependencyRelease;
         for (self.sha256) |byte| if (!std.ascii.isHex(byte)) return error.InvalidDependencyRelease;
     }
@@ -1039,6 +1035,17 @@ fn validDependencyPackageName(value: []const u8) bool {
     return true;
 }
 
+fn validZigPackageHash(value: []const u8) bool {
+    if (value.len < 48 or value.len > 192) return false;
+    var separators: usize = 0;
+    for (value) |byte| {
+        if (byte == '-') separators += 1;
+        if (std.ascii.isAlphanumeric(byte) or byte == '_' or byte == '-' or byte == '.' or byte == '+') continue;
+        return false;
+    }
+    return separators >= 2 and std.ascii.isAlphanumeric(value[0]) and std.ascii.isAlphanumeric(value[value.len - 1]);
+}
+
 fn componentKindToProject(kind: ComponentKind) ProjectKind {
     return switch (kind) {
         .application => .application,
@@ -1319,13 +1326,13 @@ test "Project dependency releases round trip immutable Zigwerk package pins" {
                 .{
                     .name = "zigeffect",
                     .url = "https://github.com/zigwerk/zigeffect/releases/download/v0.2.0/zigeffect-0.2.0.tar.gz",
-                    .hash = "zigeffect-0.2.0-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                    .hash = "zigeffect-0.1.0-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
                     .sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
                 },
                 .{
                     .name = "zigeffect-std",
                     .url = "https://github.com/zigwerk/zigeffect/releases/download/v0.2.0/zigeffect-std-0.2.0.tar.gz",
-                    .hash = "zigeffect_std-0.2.0-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+                    .hash = "zigeffect_std-0.1.0-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
                     .sha256 = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
                 },
             },
@@ -1339,7 +1346,7 @@ test "Project dependency releases round trip immutable Zigwerk package pins" {
     };
     try manifest.validate();
     const core = manifest.dependencies.package("zigeffect").?;
-    try std.testing.expectEqualStrings("zigeffect-0.2.0-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", core.hash);
+    try std.testing.expectEqualStrings("zigeffect-0.1.0-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", core.hash);
 
     const json = try manifest.jsonAlloc(std.testing.allocator);
     defer std.testing.allocator.free(json);

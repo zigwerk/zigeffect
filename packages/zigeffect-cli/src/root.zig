@@ -4572,9 +4572,9 @@ test "release generator emits immutable package pins without sibling paths" {
     const release = zstd.Project.DependencyRelease{
         .version = "0.2.0",
         .packages = &.{
-            .{ .name = "zigeffect", .url = "https://github.com/zigwerk/zigeffect/releases/download/v0.2.0/zigeffect-0.2.0.tar.gz", .hash = "zigeffect-0.2.0-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", .sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" },
-            .{ .name = "zigeffect-std", .url = "https://github.com/zigwerk/zigeffect/releases/download/v0.2.0/zigeffect-std-0.2.0.tar.gz", .hash = "zigeffect_std-0.2.0-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB", .sha256 = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789" },
-            .{ .name = "zgraphy", .url = "https://github.com/zigwerk/zigeffect/releases/download/v0.2.0/zgraphy-0.2.0.tar.gz", .hash = "zgraphy-0.2.0-CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC", .sha256 = "1111111111111111111111111111111111111111111111111111111111111111" },
+            .{ .name = "zigeffect", .url = "https://github.com/zigwerk/zigeffect/releases/download/v0.2.0/zigeffect-0.2.0.tar.gz", .hash = "zigeffect-0.1.0-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", .sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" },
+            .{ .name = "zigeffect-std", .url = "https://github.com/zigwerk/zigeffect/releases/download/v0.2.0/zigeffect-std-0.2.0.tar.gz", .hash = "zigeffect_std-0.1.0-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB", .sha256 = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789" },
+            .{ .name = "zgraphy", .url = "https://github.com/zigwerk/zigeffect/releases/download/v0.2.0/zgraphy-0.2.0.tar.gz", .hash = "zgraphy-0.1.0-CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC", .sha256 = "1111111111111111111111111111111111111111111111111111111111111111" },
         },
     };
     var plan = try generatePlan(std.testing.allocator, .{
