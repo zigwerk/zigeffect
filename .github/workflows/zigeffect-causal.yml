@@ -9,7 +9,7 @@ on:
       - "bun.lock"
   push:
     branches:
-      - master
+      - main
     paths:
       - ".github/workflows/zigeffect-causal.yml"
       - "packages/zigeffect/**"

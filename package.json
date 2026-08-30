@@ -1,0 +1,58 @@
+{
+  "name": "@zigwerk/zigeffect-workspace",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "check": "bun run test:core && bun run check:frontend",
+    "check:frontend": "bun run typecheck && bun run test:frontend && bun run build:frontend",
+    "typecheck": "bun run zigeffect:workbench:typecheck && bun run zigeffect:grpc:web:typecheck && bun run zigeffect-site:typecheck",
+    "test:frontend": "bun run zigeffect:workbench:test && bun run zigeffect:grpc:web:test-only && bun run zigeffect-site:test",
+    "build:frontend": "bun run zigeffect:workbench:build && bun run zigeffect-site:build",
+    "test:core": "cd packages/zigeffect && zig build test",
+    "test:std": "cd packages/zigeffect-std && zig build test && zig build examples",
+    "test:cli": "cd packages/zigeffect-cli && zig build test && zig build integration-test",
+    "test:packages": "scripts/test_package_release.sh",
+    "package:release": "scripts/package_release.sh",
+    "release": "cd packages/zigeffect && zig build release-gate",
+    "zigeffect:architecture:test": "bash packages/zigeffect/scripts/check_effectful_architecture.sh",
+    "zigeffect:workbench:dev": "vite --config packages/zigeffect/workbench/vite.config.ts --host 127.0.0.1",
+    "zigeffect:workbench:build": "vite build --config packages/zigeffect/workbench/vite.config.ts",
+    "zigeffect:workbench:typecheck": "tsc --noEmit -p packages/zigeffect/workbench/tsconfig.json",
+    "zigeffect:workbench:test": "bun test --timeout 30000 packages/zigeffect/workbench/src",
+    "zigeffect:grpc:web:generate": "cd packages/zigeffect-grpc && bunx @bufbuild/buf lint && bunx @bufbuild/buf build && bunx @bufbuild/buf generate",
+    "zigeffect:grpc:web:typecheck": "bun run --cwd packages/zigeffect-grpc-web typecheck",
+    "zigeffect:grpc:web:test-only": "bun run --cwd packages/zigeffect-grpc-web test",
+    "zigeffect:grpc:web:test": "bun run zigeffect:grpc:web:typecheck && bun run zigeffect:grpc:web:test-only",
+    "zigeffect:local-agent-host": "bun run packages/zigeffect/workbench/src/collector/localAgentControlHost.ts",
+    "zigeffect-site:dev": "bun run --cwd apps/zigeffect-site dev",
+    "zigeffect-site:build": "bun run --cwd apps/zigeffect-site build",
+    "zigeffect-site:preview": "bun run --cwd apps/zigeffect-site preview",
+    "zigeffect-site:typecheck": "bun run --cwd apps/zigeffect-site typecheck",
+    "zigeffect-site:test": "bun run --cwd apps/zigeffect-site test"
+  },
+  "dependencies": {
+    "@deck.gl/core": "9.3.6",
+    "@deck.gl/layers": "9.3.6",
+    "@deck.gl/mapbox": "9.3.6",
+    "@dschz/solid-g6": "0.1.1",
+    "@xterm/addon-fit": "0.11.0",
+    "@xterm/xterm": "6.0.0",
+    "lucide-solid": "1.24.0",
+    "maplibre-gl": "5.24.0",
+    "solid-js": "1.9.13",
+    "three": "0.185.1",
+    "xstate": "5.32.4"
+  },
+  "devDependencies": {
+    "@bufbuild/buf": "1.71.0",
+    "@types/bun": "latest",
+    "@types/three": "0.185.1",
+    "typescript": "5.9.3",
+    "vite": "8.0.16",
+    "vite-plugin-solid": "2.11.12"
+  }
+}

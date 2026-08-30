@@ -19,7 +19,7 @@ on:
       - ".agents/skills/zigeffect-development/**"
       - ".claude/skills/zigeffect-development/**"
   push:
-    branches: [master]
+    branches: [main]
     paths:
       - ".github/workflows/zigeffect-production.yml"
       - "packages/zigeffect*/**"
