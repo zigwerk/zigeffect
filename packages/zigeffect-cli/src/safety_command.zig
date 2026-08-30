@@ -476,7 +476,9 @@ fn collectSources(
 ) !SourceCollection {
     var output = SourceCollection{ .allocator = allocator };
     errdefer output.deinit();
-    var walker = try base_dir.walk(allocator);
+    var scan_dir = try base_dir.openDir(io, ".", .{ .iterate = true });
+    defer scan_dir.close(io);
+    var walker = try scan_dir.walk(allocator);
     defer walker.deinit();
     var total_bytes: usize = 0;
     while (try walker.next(io)) |entry| {
@@ -490,7 +492,7 @@ fn collectSources(
 
         const remaining = manifest.safety.limits.max_source_bytes -| total_bytes;
         if (remaining == 0) return error.SourceLimitExceeded;
-        const source = try base_dir.readFileAllocOptions(io, entry.path, allocator, .limited(remaining + 1), .of(u8), 0);
+        const source = try scan_dir.readFileAllocOptions(io, entry.path, allocator, .limited(remaining + 1), .of(u8), 0);
         errdefer allocator.free(source);
         total_bytes += source.len;
         if (total_bytes > manifest.safety.limits.max_source_bytes) return error.SourceLimitExceeded;

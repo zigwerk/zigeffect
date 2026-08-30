@@ -1772,7 +1772,7 @@ test "zgraphy ZigEffect source bridge links manifest intent to stable code refer
     defer std.testing.allocator.free(source_ref);
     try std.testing.expectEqualStrings("zgraphy://source/src/main.zig#main", source_ref);
 
-    var tmp = std.testing.tmpDir(.{});
+    var tmp = std.testing.tmpDir(.{ .iterate = true });
     defer tmp.cleanup();
     const link_layer = zgraphy.ZigEffectBridge.liveLayer();
     var runtime = try zstd.ManagedRuntime(@TypeOf(link_layer)).make(
