@@ -26,6 +26,7 @@
         ".zigeffect/scaffold-state.json",
         "README.md",
         "THIRD_PARTY_NOTICES.md",
+        "benchmarks",
         "build.zig",
         "build.zig.zon",
         "src",

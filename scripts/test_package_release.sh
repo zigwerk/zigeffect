@@ -56,6 +56,12 @@ if grep -q '\.path = "\.\./' "$zgraphy_zon"; then
   echo "published zgraphy package retained a monorepo path dependency" >&2
   exit 1
 fi
+grep -q '"benchmarks"' "$zgraphy_zon"
+zgraphy_cache="$output/zgraphy-cache"
+zgraphy_hash="$(cd "$root/packages/zigeffect" && zig fetch --global-cache-dir "$zgraphy_cache" "$output/zgraphy-0.1.0.tar.gz")"
+zgraphy_cached_archive="$zgraphy_cache/p/${zgraphy_hash}.tar.gz"
+test -f "$zgraphy_cached_archive"
+tar -tzf "$zgraphy_cached_archive" | grep -q '/benchmarks/embedded\.zig$'
 
 expected="$(awk -F '\t' '$1 == "zigeffect-std-0.1.0.tar.gz" { print $2 }' "$output/manifest.tsv")"
 actual="$(cd "$root/packages/zigeffect" && zig fetch "$output/zigeffect-std-0.1.0.tar.gz")"
