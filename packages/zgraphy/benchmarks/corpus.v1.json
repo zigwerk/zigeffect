@@ -1,0 +1,82 @@
+{
+  "schema": "zgraphy.benchmark-corpus.v1",
+  "schema_version": 1,
+  "canonical_ir_schema": "zgraphy.canonical-benchmark-ir.v1",
+  "baseline": {
+    "product": "Graphify",
+    "version": "0.9.17",
+    "commit": "cb96bdaa0c367bec8d5c5aee5d7c9ebb727e9780"
+  },
+  "fixtures": [
+    {
+      "id": "zig-ambiguity",
+      "title": "Zig import aliases retain both viable call targets",
+      "root": "benchmarks/fixtures/zig-ambiguity",
+      "scan_root": "benchmarks/fixtures/zig-ambiguity",
+      "gold": "benchmarks/gold/zig-ambiguity.canonical.v1.json",
+      "languages": ["zig"],
+      "capabilities": ["identity", "import-resolution", "ambiguity", "retrieval"],
+      "held_out": false,
+      "mutations": []
+    },
+    {
+      "id": "fullstack-orders",
+      "title": "TypeScript Solid callsite reaches a canonical Proto RPC and Zig handler",
+      "root": "benchmarks/fixtures/fullstack-orders",
+      "scan_root": "benchmarks/fixtures/fullstack-orders",
+      "gold": "benchmarks/gold/fullstack-orders.canonical.v1.json",
+      "languages": ["zig", "typescript", "proto"],
+      "capabilities": ["cross-stack-contract", "hyperedge-proof", "supernode-proof", "retrieval", "change-impact"],
+      "held_out": false,
+      "mutations": []
+    },
+    {
+      "id": "mutation-pruning",
+      "title": "Modify rename and delete converge without stale or orphaned records",
+      "root": "benchmarks/fixtures/mutation-pruning",
+      "scan_root": "benchmarks/fixtures/mutation-pruning/baseline",
+      "gold": "benchmarks/gold/mutation-pruning.canonical.v1.json",
+      "languages": ["zig"],
+      "capabilities": ["incremental-equivalence", "stable-identity", "freshness-pruning", "retrieval"],
+      "held_out": false,
+      "mutations": [
+        {
+          "id": "modify-catalog",
+          "operation": "modify",
+          "path": "baseline/src/catalog.zig",
+          "to_path": null,
+          "replacement_path": "mutations/01-modify/catalog.zig",
+          "replacement_sha256": "a1cd22da7595d20f77927ff271516539d2a47aaf2043a897805f54bcdee96303",
+          "expected_removed_entities": [],
+          "expected_preserved_entities": ["symbol:mutation:feature", "symbol:mutation:orphaned"],
+          "expected_invalidated_facts": ["fact:mutation:catalog-version"],
+          "expected_no_orphans": true
+        },
+        {
+          "id": "rename-catalog-to-inventory",
+          "operation": "rename",
+          "path": "baseline/src/catalog.zig",
+          "to_path": "baseline/src/inventory.zig",
+          "replacement_path": "mutations/02-rename/inventory.zig",
+          "replacement_sha256": "a1cd22da7595d20f77927ff271516539d2a47aaf2043a897805f54bcdee96303",
+          "expected_removed_entities": ["file:mutation:catalog"],
+          "expected_preserved_entities": ["symbol:mutation:feature", "symbol:mutation:orphaned"],
+          "expected_invalidated_facts": [],
+          "expected_no_orphans": true
+        },
+        {
+          "id": "delete-inventory",
+          "operation": "delete",
+          "path": "baseline/src/inventory.zig",
+          "to_path": null,
+          "replacement_path": null,
+          "replacement_sha256": null,
+          "expected_removed_entities": ["file:mutation:inventory", "symbol:mutation:feature", "symbol:mutation:orphaned"],
+          "expected_preserved_entities": ["file:mutation:main", "symbol:mutation:main"],
+          "expected_invalidated_facts": ["fact:mutation:catalog-version"],
+          "expected_no_orphans": true
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "compilerOptions": {
+    "baseUrl": "..",
+    "paths": {
+      "@array-parent/*": ["packages/shared/src/*"],
+    },
+  },
+}
+

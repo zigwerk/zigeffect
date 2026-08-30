@@ -1,0 +1,33 @@
+{
+  "schema": "zgraphy.graphify-typescript-overlap.v1",
+  "baseline": {
+    "product": "Graphify",
+    "version": "0.9.17",
+    "commit": "cb96bdaa0c367bec8d5c5aee5d7c9ebb727e9780",
+    "mode": "extract --code-only --no-cluster --force --max-workers 1",
+    "source_graph_sha256": "68f3b60295e35f2c8d566bf3a47c9af309190e908f14420167834fa06c60c127"
+  },
+  "facts": [
+    {"source":"apps/web/src/page.cjs","target":"apps/web/src/local.ts","deferred":false},
+    {"source":"apps/web/src/page.ts","target":"apps/web/src/local.ts","deferred":false},
+    {"source":"apps/web/src/page.ts","target":"apps/web/src/esm.ts","deferred":false},
+    {"source":"apps/web/src/page.ts","target":"apps/web/src/feature.ts","deferred":false},
+    {"source":"apps/web/src/page.ts","target":"apps/web/src/directory/index.ts","deferred":false},
+    {"source":"apps/web/src/page.ts","target":"apps/web/src/multi.shared.ts","deferred":false},
+    {"source":"apps/web/src/page.ts","target":"apps/web/src/state.svelte.ts","deferred":false},
+    {"source":"apps/web/src/page.ts","target":"packages/exact/src/exact.ts","deferred":false},
+    {"source":"apps/web/src/page.ts","target":"packages/shared/src/shared.ts","deferred":false},
+    {"source":"apps/web/src/page.ts","target":"packages/shared/src/extra.ts","deferred":false},
+    {"source":"apps/web/src/page.ts","target":"packages/shared/src/client.ts","deferred":false},
+    {"source":"apps/web/src/page.ts","target":"packages/shared/src/index.ts","deferred":false},
+    {"source":"apps/web/src/page.ts","target":"packages/fallback/src/index.ts","deferred":false},
+    {"source":"apps/web/src/page.ts","target":"apps/web/src/legacy.ts","deferred":false},
+    {"source":"apps/web/src/page.ts","target":"apps/web/src/lazy.ts","deferred":true},
+    {"source":"npm-fallback/apps/web/page.ts","target":"npm-fallback/packages/only/src/index.ts","deferred":false}
+  ],
+  "classified_differences": [
+    {"kind":"expanded_ambiguity","specifier":"@acme/duplicate","graphify_target":"duplicates/b/src/index.ts","zgraphy_expectation":"retain both duplicate workspace candidates"},
+    {"kind":"rejected_escape","specifier":"@acme/evil","graphify_target":"packages/outside.ts","zgraphy_expectation":"no local edge and a package_escape diagnostic"},
+    {"kind":"rejected_phantom","specifier":"./missing","graphify_target":"apps/web/src/missing","zgraphy_expectation":"unresolved reference with no candidate"}
+  ]
+}

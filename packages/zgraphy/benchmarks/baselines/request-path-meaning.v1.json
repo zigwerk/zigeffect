@@ -1,0 +1,101 @@
+{
+  "schema": "zgraphy.request-path-meaning-benchmark.v1",
+  "schema_version": 1,
+  "promotion_status": "candidate_engineering_evidence",
+  "fixture": {
+    "id": "fullstack-orders",
+    "root": "benchmarks/fixtures/fullstack-orders",
+    "digest": "sha256:5ad4a5dea87319085f37f6e5c8f15e4f07a36af3c9a40b7f6fc846862e5904c5"
+  },
+  "identity": {
+    "zgraphy_source_revision": "sha256:62342b4b83d9d4fe732ab410e6d46d5716616a5ab460ff3eb67815a8629777d4",
+    "zgraphy_version": "0.1.0",
+    "zgraphy_adapter": "zgraphy-native-v4",
+    "zgraphy_input_schema": "zgraphy.repository-graph.v2",
+    "zig_version": "0.16.0",
+    "optimize": "ReleaseSafe",
+    "graphify_version": "0.9.17",
+    "graphify_commit": "cb96bdaa0c367bec8d5c5aee5d7c9ebb727e9780",
+    "graphify_python": "3.11.15",
+    "graphify_environment": "sha256:fd6957286203f5099709e7ba42a5d2da9984e9f8068661e389f9c86a1376a51d",
+    "graphify_graph_sha256": "sha256:1f7c8fc36267cd19fe03891f96a94b6d92288868dec6a199c9871a306473797a",
+    "platform": "macOS-26.4.1-arm64-arm-64bit"
+  },
+  "configuration": {
+    "warmups": 2,
+    "repetitions": 7,
+    "supervisor": "wait4-process-isolation-v1",
+    "graphify_command": ["extract", "--code-only", "--no-cluster", "--force"],
+    "zgraphy_command": ["benchmark", "workload", "fullstack-orders", "cold-build"],
+    "credentials_removed": true,
+    "process_elapsed_includes_startup_and_serialization": true,
+    "peak_rss_source": "wait4.ru_maxrss"
+  },
+  "quality": {
+    "expected": {"entities": 16, "relations": 22, "facts": 2, "hyperedges": 1, "supernodes": 1},
+    "graphify": {
+      "matched_entities": 10,
+      "matched_relations": 11,
+      "matched_facts": 0,
+      "matched_hyperedges": 0,
+      "matched_supernodes": 0,
+      "unexpected_entities": 19,
+      "unexpected_relations": 28
+    },
+    "zgraphy": {
+      "matched_entities": 16,
+      "matched_relations": 22,
+      "matched_facts": 2,
+      "matched_hyperedges": 1,
+      "matched_supernodes": 1,
+      "unexpected_entities": 74,
+      "unexpected_relations": 134
+    }
+  },
+  "performance": {
+    "graphify_process_elapsed_ns": {"min": 207244792, "p50": 232166625, "p95": 284025333, "p99": 284025333, "max": 284025333},
+    "zgraphy_process_elapsed_ns": {"min": 125546875, "p50": 128356958, "p95": 204617541, "p99": 204617541, "max": 204617541},
+    "zgraphy_engine_workload_elapsed_ns": {"min": 23832417, "p50": 24557083, "p95": 36761458, "p99": 36761458, "max": 36761458},
+    "p50_process_speedup_ratio": 1.8087576132803023,
+    "p50_process_elapsed_reduction_percent": 44.713432432417875
+  },
+  "memory": {
+    "graphify_peak_rss_bytes": {"min": 49315840, "p50": 49348608, "p95": 49692672, "p99": 49692672, "max": 49692672},
+    "zgraphy_peak_rss_bytes": {"min": 80314368, "p50": 80347136, "p95": 81379328, "p99": 81379328, "max": 81379328},
+    "zgraphy_to_graphify_p50_ratio": 1.6281540504648075
+  },
+  "storage": {
+    "graphify_persisted_bytes": 21979,
+    "zgraphy_persisted_bytes": 74649,
+    "zgraphy_to_graphify_ratio": 3.3963783611629283,
+    "graphify_nodes": 28,
+    "graphify_relations": 36,
+    "graphify_hyperedges": 0,
+    "zgraphy_nodes": 93,
+    "zgraphy_relations": 152,
+    "zgraphy_vectors": 93,
+    "zgraphy_hyperedges": 1,
+    "zgraphy_supernodes": 1
+  },
+  "samples": {
+    "graphify_process_elapsed_ns": [226688708, 207244792, 211657375, 284025333, 237694916, 232166625, 260482166],
+    "zgraphy_process_elapsed_ns": [125546875, 204617541, 125814583, 128356958, 126156500, 146734833, 135571875],
+    "zgraphy_engine_workload_elapsed_ns": [24557083, 36761458, 24250208, 24478250, 23832417, 26527250, 24726250],
+    "graphify_peak_rss_bytes": [49397760, 49332224, 49348608, 49692672, 49315840, 49348608, 49512448],
+    "zgraphy_peak_rss_bytes": [81379328, 80347136, 80347136, 80314368, 80347136, 80330752, 80412672]
+  },
+  "claim_status": {
+    "semantic_gold_coverage": "measured_candidate_advantage",
+    "process_latency": "measured_candidate_advantage",
+    "peak_memory": "measured_candidate_gap",
+    "persisted_size": "measured_candidate_gap",
+    "conservative_precision_superiority": "not_claimed"
+  },
+  "limitations": [
+    "This is a controlled local ARM64 macOS candidate benchmark, not a production platform matrix.",
+    "The semantic-quality claim is exact canonical-gold coverage, not overall precision: zgraphy's richer internal graph creates projection loss against the intentionally narrow gold contract.",
+    "Graphify and zgraphy persist different semantic depth; zgraphy also stores deterministic vectors, a typed request-path hyperedge and a proof-carrying feature supernode.",
+    "Peak RSS and raw persisted size are measured gaps and remain optimization targets.",
+    "Automatic freshness, incremental invalidation and generation publication are excluded from this M2.6 receipt."
+  ]
+}

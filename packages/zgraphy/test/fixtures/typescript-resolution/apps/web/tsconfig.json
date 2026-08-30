@@ -1,0 +1,10 @@
+{
+  "extends": ["../../tsconfig.json", "../../configs/cycle-a.json"],
+  "compilerOptions": {
+    "baseUrl": "../..",
+    "paths": {
+      "@web/*": ["apps/web/src/*"],
+      "@override": ["packages/exact/src/exact.ts"],
+    },
+  },
+}

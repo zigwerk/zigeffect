@@ -1,0 +1,6 @@
+{
+  "name": "npm-workspace-fallback",
+  "private": true,
+  "workspaces": ["apps/*", "packages/*"]
+}
+

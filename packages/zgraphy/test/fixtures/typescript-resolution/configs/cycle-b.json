@@ -1,0 +1,7 @@
+{
+  "extends": "./cycle-a.json",
+  "compilerOptions": {
+    "baseUrl": "..",
+  },
+}
+

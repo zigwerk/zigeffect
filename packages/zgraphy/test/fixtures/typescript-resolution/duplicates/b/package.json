@@ -1,0 +1,6 @@
+{
+  "name": "@acme/duplicate",
+  "version": "1.0.0-b",
+  "exports": "./src/index.ts"
+}
+

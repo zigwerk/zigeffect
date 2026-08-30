@@ -1,0 +1,99 @@
+{
+  "schema": "zgraphy.cross-stack-operation-benchmark.v1",
+  "schema_version": 1,
+  "fixture": {
+    "id": "fullstack-orders",
+    "root": "benchmarks/fixtures/fullstack-orders",
+    "digest": "sha256:5ad4a5dea87319085f37f6e5c8f15e4f07a36af3c9a40b7f6fc846862e5904c5"
+  },
+  "identity": {
+    "zgraphy_source_revision": "sha256:fc691a25bd77275885cdf73b218fecefbc54cc53c60b096adf8913c70ccd47ef",
+    "zgraphy_version": "0.1.0",
+    "zgraphy_adapter": "zgraphy-native-v3",
+    "zig_version": "0.16.0",
+    "optimize": "ReleaseSafe",
+    "graphify_version": "0.9.17",
+    "graphify_commit": "cb96bdaa0c367bec8d5c5aee5d7c9ebb727e9780",
+    "graphify_python": "3.11.15",
+    "graphify_environment": "sha256:fd6957286203f5099709e7ba42a5d2da9984e9f8068661e389f9c86a1376a51d",
+    "platform": "macOS-26.4.1-arm64-arm-64bit"
+  },
+  "configuration": {
+    "warmups": 2,
+    "repetitions": 7,
+    "graphify_command": ["extract", "--code-only", "--no-cluster", "--force"],
+    "zgraphy_command": ["benchmark", "workload", "fullstack-orders", "cold-build"],
+    "credentials_removed": true,
+    "process_elapsed_includes_startup_and_serialization": true,
+    "peak_rss_measured": false
+  },
+  "quality": {
+    "expected_entities": 16,
+    "expected_relations": 22,
+    "graphify": {
+      "matched_entities": 10,
+      "matched_relations": 11,
+      "canonical_operations": 0,
+      "frontend_invokes_operation": 0,
+      "backend_handles_operation": 0,
+      "complete_interactions": 0
+    },
+    "zgraphy": {
+      "matched_entities": 16,
+      "matched_relations": 17,
+      "canonical_operations": 1,
+      "frontend_invokes_operation": 1,
+      "backend_handles_operation": 1,
+      "complete_interactions": 1
+    }
+  },
+  "performance": {
+    "graphify_process_elapsed_ns": {
+      "min": 140258417,
+      "p50": 157508375,
+      "p95": 165042042,
+      "max": 165042042
+    },
+    "zgraphy_process_elapsed_ns": {
+      "min": 65532167,
+      "p50": 71452500,
+      "p95": 75476750,
+      "max": 75476750
+    },
+    "zgraphy_engine_workload_elapsed_ns": {
+      "min": 17264667,
+      "p50": 18406417,
+      "p95": 19038000,
+      "max": 19038000
+    },
+    "p50_process_speedup_ratio": 2.204378783107659,
+    "p50_process_elapsed_reduction_percent": 54.63574555956152
+  },
+  "storage": {
+    "graphify_persisted_bytes": 21979,
+    "zgraphy_persisted_bytes": 67352,
+    "zgraphy_to_graphify_ratio": 3.0643796351062376,
+    "graphify_nodes": 28,
+    "graphify_relations": 36,
+    "zgraphy_nodes": 93,
+    "zgraphy_relations": 149,
+    "zgraphy_vectors": 93
+  },
+  "samples": {
+    "graphify_process_elapsed_ns": [140258417, 150083250, 163302125, 165042042, 157508375, 161212875, 152193584],
+    "zgraphy_process_elapsed_ns": [65532167, 69427416, 71452500, 71564833, 73523583, 75476750, 70672209],
+    "zgraphy_engine_workload_elapsed_ns": [17414000, 18423958, 18396041, 18406417, 18681000, 19038000, 17264667]
+  },
+  "claim_status": {
+    "semantic_quality": "measured_candidate_advantage",
+    "process_latency": "measured_candidate_advantage",
+    "persisted_size": "measured_candidate_gap",
+    "peak_memory": "unmeasured"
+  },
+  "limitations": [
+    "This is a controlled local ARM64 macOS candidate benchmark, not a production platform matrix.",
+    "Graphify and zgraphy persist different semantic depth and zgraphy stores deterministic vectors, so raw bytes are reported without normalization.",
+    "Peak RSS was not collected in this cross-stack run and no memory-efficiency claim is authorized.",
+    "Request-path hyperedges, supernodes and derived facts remain missing from both differential projections in M2.5."
+  ]
+}

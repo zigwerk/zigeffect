@@ -1,0 +1,74 @@
+{
+  "schema": "zgraphy.canonical-benchmark-ir.v1",
+  "schema_version": 1,
+  "fixture_id": "fullstack-orders",
+  "generation": 0,
+  "evidence": [
+    {"id":"e:orders:proto-service","source":{"path":"proto/orders/v1/orders.proto","content_sha256":"6c145dd9f5da6dd7cbd8745b039c034f10200572b4132e87dd849c1f88c7367a","start_line":3,"start_column":1,"end_line":7,"end_column":1}},
+    {"id":"e:orders:proto-request","source":{"path":"proto/orders/v1/orders.proto","content_sha256":"6c145dd9f5da6dd7cbd8745b039c034f10200572b4132e87dd849c1f88c7367a","start_line":9,"start_column":1,"end_line":11,"end_column":1}},
+    {"id":"e:orders:proto-order","source":{"path":"proto/orders/v1/orders.proto","content_sha256":"6c145dd9f5da6dd7cbd8745b039c034f10200572b4132e87dd849c1f88c7367a","start_line":13,"start_column":1,"end_line":16,"end_column":1}},
+    {"id":"e:orders:zig-types","source":{"path":"backend/src/orders_service.zig","content_sha256":"fe834996ef07ead72ceee89fbf7d082608a2e38e044dc478a9aa02e8542edf51","start_line":5,"start_column":1,"end_line":9,"end_column":1}},
+    {"id":"e:orders:zig-handler","source":{"path":"backend/src/orders_service.zig","content_sha256":"fe834996ef07ead72ceee89fbf7d082608a2e38e044dc478a9aa02e8542edf51","start_line":6,"start_column":1,"end_line":9,"end_column":1}},
+    {"id":"e:orders:zig-loader","source":{"path":"backend/src/orders_service.zig","content_sha256":"fe834996ef07ead72ceee89fbf7d082608a2e38e044dc478a9aa02e8542edf51","start_line":24,"start_column":1,"end_line":27,"end_column":1}},
+    {"id":"e:orders:zig-test","source":{"path":"backend/src/orders_service.zig","content_sha256":"fe834996ef07ead72ceee89fbf7d082608a2e38e044dc478a9aa02e8542edf51","start_line":29,"start_column":1,"end_line":33,"end_column":1}},
+    {"id":"e:orders:ts-client","source":{"path":"frontend/src/ordersClient.ts","content_sha256":"4fc269cf632a8ddd50627c56c816e1df1e82ecee07b5d2adb40741667bf302a8","start_line":1,"start_column":1,"end_line":5,"end_column":1}},
+    {"id":"e:orders:ts-fetch","source":{"path":"frontend/src/ordersClient.ts","content_sha256":"4fc269cf632a8ddd50627c56c816e1df1e82ecee07b5d2adb40741667bf302a8","start_line":7,"start_column":1,"end_line":9,"end_column":1}},
+    {"id":"e:orders:tsx-page","source":{"path":"frontend/src/OrderPage.tsx","content_sha256":"04bb772fdd084c5734fe276921b68950274cfa8adefbd109fa7f07dce0e9b921","start_line":1,"start_column":1,"end_line":7,"end_column":1}}
+  ],
+  "entities": [
+    {"id":"repo:orders","kind":"repository","name":"fullstack-orders","evidence":["e:orders:proto-service"]},
+    {"id":"file:orders:proto","kind":"file","name":"proto/orders/v1/orders.proto","evidence":["e:orders:proto-service"]},
+    {"id":"file:orders:zig","kind":"file","name":"backend/src/orders_service.zig","evidence":["e:orders:zig-handler"]},
+    {"id":"file:orders:client","kind":"file","name":"frontend/src/ordersClient.ts","evidence":["e:orders:ts-client"]},
+    {"id":"file:orders:page","kind":"file","name":"frontend/src/OrderPage.tsx","evidence":["e:orders:tsx-page"]},
+    {"id":"contract:orders.v1.OrdersService","kind":"service","name":"orders.v1.OrdersService","evidence":["e:orders:proto-service"]},
+    {"id":"contract:orders.v1.OrdersService/GetOrder","kind":"rpc_method","name":"orders.v1.OrdersService/GetOrder","evidence":["e:orders:proto-service"]},
+    {"id":"type:orders.v1.GetOrderRequest","kind":"message","name":"orders.v1.GetOrderRequest","evidence":["e:orders:proto-request"]},
+    {"id":"type:orders.v1.Order","kind":"message","name":"orders.v1.Order","evidence":["e:orders:proto-order"]},
+    {"id":"type:zig:OrdersService","kind":"type","name":"OrdersService","evidence":["e:orders:zig-handler"]},
+    {"id":"symbol:zig:OrdersService.getOrder","kind":"function","name":"OrdersService.GetOrder","evidence":["e:orders:zig-handler"]},
+    {"id":"symbol:zig:loadOrder","kind":"function","name":"loadOrder","evidence":["e:orders:zig-loader"]},
+    {"id":"test:zig:GetOrder","kind":"test","name":"GetOrder returns an order","evidence":["e:orders:zig-test"]},
+    {"id":"client:ts:ordersClient","kind":"client","name":"ordersClient","evidence":["e:orders:ts-client"]},
+    {"id":"symbol:ts:fetchOrder","kind":"function","name":"fetchOrder","evidence":["e:orders:ts-fetch"]},
+    {"id":"component:ts:OrderPage","kind":"component","name":"OrderPage","evidence":["e:orders:tsx-page"]}
+  ],
+  "relations": [
+    {"id":"rel:orders:repo-proto","kind":"contains","from":"repo:orders","to":"file:orders:proto","provenance":"extracted","confidence":1.0,"evidence":["e:orders:proto-service"]},
+    {"id":"rel:orders:repo-zig","kind":"contains","from":"repo:orders","to":"file:orders:zig","provenance":"extracted","confidence":1.0,"evidence":["e:orders:zig-handler"]},
+    {"id":"rel:orders:repo-client","kind":"contains","from":"repo:orders","to":"file:orders:client","provenance":"extracted","confidence":1.0,"evidence":["e:orders:ts-client"]},
+    {"id":"rel:orders:repo-page","kind":"contains","from":"repo:orders","to":"file:orders:page","provenance":"extracted","confidence":1.0,"evidence":["e:orders:tsx-page"]},
+    {"id":"rel:orders:proto-service","kind":"declares","from":"file:orders:proto","to":"contract:orders.v1.OrdersService","provenance":"extracted","confidence":1.0,"evidence":["e:orders:proto-service"]},
+    {"id":"rel:orders:service-method","kind":"declares","from":"contract:orders.v1.OrdersService","to":"contract:orders.v1.OrdersService/GetOrder","provenance":"extracted","confidence":1.0,"evidence":["e:orders:proto-service"]},
+    {"id":"rel:orders:proto-request","kind":"declares","from":"file:orders:proto","to":"type:orders.v1.GetOrderRequest","provenance":"extracted","confidence":1.0,"evidence":["e:orders:proto-request"]},
+    {"id":"rel:orders:proto-order","kind":"declares","from":"file:orders:proto","to":"type:orders.v1.Order","provenance":"extracted","confidence":1.0,"evidence":["e:orders:proto-order"]},
+    {"id":"rel:orders:zig-service","kind":"declares","from":"file:orders:zig","to":"type:zig:OrdersService","provenance":"extracted","confidence":1.0,"evidence":["e:orders:zig-handler"]},
+    {"id":"rel:orders:zig-handler","kind":"declares","from":"type:zig:OrdersService","to":"symbol:zig:OrdersService.getOrder","provenance":"extracted","confidence":1.0,"evidence":["e:orders:zig-handler"]},
+    {"id":"rel:orders:zig-loader","kind":"declares","from":"file:orders:zig","to":"symbol:zig:loadOrder","provenance":"extracted","confidence":1.0,"evidence":["e:orders:zig-loader"]},
+    {"id":"rel:orders:zig-test","kind":"declares","from":"file:orders:zig","to":"test:zig:GetOrder","provenance":"extracted","confidence":1.0,"evidence":["e:orders:zig-test"]},
+    {"id":"rel:orders:client-declaration","kind":"declares","from":"file:orders:client","to":"client:ts:ordersClient","provenance":"extracted","confidence":1.0,"evidence":["e:orders:ts-client"]},
+    {"id":"rel:orders:fetch-declaration","kind":"declares","from":"file:orders:client","to":"symbol:ts:fetchOrder","provenance":"extracted","confidence":1.0,"evidence":["e:orders:ts-fetch"]},
+    {"id":"rel:orders:page-declaration","kind":"declares","from":"file:orders:page","to":"component:ts:OrderPage","provenance":"extracted","confidence":1.0,"evidence":["e:orders:tsx-page"]},
+    {"id":"rel:orders:client-generated","kind":"generated_from","from":"client:ts:ordersClient","to":"contract:orders.v1.OrdersService","provenance":"resolved","confidence":1.0,"evidence":["e:orders:ts-client","e:orders:proto-service"]},
+    {"id":"rel:orders:fetch-calls-client","kind":"calls","from":"symbol:ts:fetchOrder","to":"client:ts:ordersClient","provenance":"resolved","confidence":1.0,"evidence":["e:orders:ts-fetch"]},
+    {"id":"rel:orders:fetch-invokes-rpc","kind":"invokes_contract","from":"symbol:ts:fetchOrder","to":"contract:orders.v1.OrdersService/GetOrder","provenance":"resolved","confidence":1.0,"evidence":["e:orders:ts-fetch","e:orders:proto-service"]},
+    {"id":"rel:orders:rpc-implemented-by-zig","kind":"implements_contract","from":"symbol:zig:OrdersService.getOrder","to":"contract:orders.v1.OrdersService/GetOrder","provenance":"resolved","confidence":1.0,"evidence":["e:orders:zig-handler","e:orders:proto-service"]},
+    {"id":"rel:orders:handler-calls-loader","kind":"calls","from":"symbol:zig:OrdersService.getOrder","to":"symbol:zig:loadOrder","provenance":"resolved","confidence":1.0,"evidence":["e:orders:zig-handler","e:orders:zig-loader"]},
+    {"id":"rel:orders:page-calls-fetch","kind":"calls","from":"component:ts:OrderPage","to":"symbol:ts:fetchOrder","provenance":"resolved","confidence":1.0,"evidence":["e:orders:tsx-page","e:orders:ts-fetch"]},
+    {"id":"rel:orders:test-covers-handler","kind":"covers","from":"test:zig:GetOrder","to":"symbol:zig:OrdersService.getOrder","provenance":"resolved","confidence":1.0,"evidence":["e:orders:zig-test","e:orders:zig-handler"]}
+  ],
+  "facts": [
+    {"id":"fact:orders:canonical-contract","subject":"contract:orders.v1.OrdersService/GetOrder","predicate":"canonical_contract_identity","value":"orders.v1.OrdersService/GetOrder","provenance":"extracted","confidence":1.0,"evidence":["e:orders:proto-service"],"alternatives":[]},
+    {"id":"fact:orders:frontend-backend-path","subject":"component:ts:OrderPage","predicate":"reaches_backend_handler","value":"symbol:zig:OrdersService.getOrder","provenance":"derived","confidence":1.0,"evidence":["e:orders:tsx-page","e:orders:ts-fetch","e:orders:proto-service","e:orders:zig-handler"],"alternatives":[]}
+  ],
+  "hyperedges": [
+    {"id":"hyperedge:orders:get-order-request","kind":"request_path","participants":[{"entity":"component:ts:OrderPage","role":"ui_consumer"},{"entity":"symbol:ts:fetchOrder","role":"frontend_callsite"},{"entity":"contract:orders.v1.OrdersService/GetOrder","role":"canonical_contract"},{"entity":"symbol:zig:OrdersService.getOrder","role":"backend_handler"},{"entity":"symbol:zig:loadOrder","role":"data_loader"}],"evidence":["e:orders:tsx-page","e:orders:ts-fetch","e:orders:proto-service","e:orders:zig-handler","e:orders:zig-loader"]}
+  ],
+  "supernodes": [
+    {"id":"supernode:orders:read-feature","kind":"feature","name":"Read order feature","members":["component:ts:OrderPage","symbol:ts:fetchOrder","contract:orders.v1.OrdersService/GetOrder","symbol:zig:OrdersService.getOrder","symbol:zig:loadOrder","test:zig:GetOrder"],"proof_relations":["rel:orders:page-calls-fetch","rel:orders:fetch-invokes-rpc","rel:orders:rpc-implemented-by-zig","rel:orders:handler-calls-loader","rel:orders:test-covers-handler"],"synopsis":"OrderPage fetches an order through the canonical GetOrder RPC, whose Zig handler loads the order and is covered by a focused test."}
+  ],
+  "retrieval_tasks": [
+    {"id":"task:orders:explain-flow","intent":"explanation","query":"how does OrderPage fetch an order from the Zig backend","required_entities":["component:ts:OrderPage","contract:orders.v1.OrdersService/GetOrder","symbol:zig:OrdersService.getOrder"],"required_relations":["rel:orders:page-calls-fetch","rel:orders:fetch-invokes-rpc","rel:orders:rpc-implemented-by-zig"],"required_facts":["fact:orders:frontend-backend-path"],"max_results":10},
+    {"id":"task:orders:change-impact","intent":"change_impact","query":"what is affected if GetOrder response changes","required_entities":["type:orders.v1.Order","symbol:ts:fetchOrder","component:ts:OrderPage","symbol:zig:OrdersService.getOrder","test:zig:GetOrder"],"required_relations":["rel:orders:fetch-invokes-rpc","rel:orders:rpc-implemented-by-zig","rel:orders:test-covers-handler"],"required_facts":["fact:orders:canonical-contract"],"max_results":12}
+  ]
+}

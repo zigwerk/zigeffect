@@ -1,0 +1,10 @@
+{
+  "extends": "./cycle-b.json",
+  "compilerOptions": {
+    "baseUrl": "..",
+    "paths": {
+      "@cycle/*": ["packages/shared/src/*"],
+    },
+  },
+}
+

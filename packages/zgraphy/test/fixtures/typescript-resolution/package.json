@@ -1,0 +1,6 @@
+{
+  "name": "zgraphy-typescript-resolution-fixture",
+  "private": true,
+  "workspaces": ["apps/*", "packages/*", "duplicates/*", "ignored/*"]
+}
+

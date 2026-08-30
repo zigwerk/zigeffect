@@ -1,0 +1,32 @@
+{
+  "schema": "zgraphy.graphify-typescript-symbol-overlap.v1",
+  "baseline": {
+    "product": "Graphify",
+    "version": "0.9.17",
+    "commit": "cb96bdaa0c367bec8d5c5aee5d7c9ebb727e9780",
+    "mode": "extract --code-only --no-cluster --force",
+    "source_graph_sha256": "ee2f728fa46e493bd566cf5926c6d1cc305c2b7e977e3c8f8adfc8d55f8e5135"
+  },
+  "facts": [
+    {"kind":"export_binding","source_path":"src/barrel.ts","subject":"PublicService","target_path":"src/origin.ts","target_enclosing":"","target_name":"Service"},
+    {"kind":"export_binding","source_path":"src/barrel.ts","subject":"check","target_path":"src/origin.ts","target_enclosing":"","target_name":"validate"},
+    {"kind":"export_binding","source_path":"src/barrel.ts","subject":"PublicContract","target_path":"src/origin.ts","target_enclosing":"","target_name":"Contract"},
+    {"kind":"import_binding","source_path":"src/consumer.ts","subject":"PublicService","target_path":"src/origin.ts","target_enclosing":"","target_name":"Service"},
+    {"kind":"import_binding","source_path":"src/consumer.ts","subject":"check","target_path":"src/origin.ts","target_enclosing":"","target_name":"validate"},
+    {"kind":"import_binding","source_path":"src/consumer.ts","subject":"createThing","target_path":"src/origin.ts","target_enclosing":"","target_name":"makeThing"},
+    {"kind":"import_binding","source_path":"src/consumer.ts","subject":"PublicContract","target_path":"src/origin.ts","target_enclosing":"","target_name":"Contract"},
+    {"kind":"import_binding","source_path":"src/consumer.ts","subject":"OtherService","target_path":"src/other.ts","target_enclosing":"","target_name":"OtherService"},
+    {"kind":"member_call","source_path":"src/consumer.ts","subject":"other.doThing","target_path":"src/other.ts","target_enclosing":"OtherService","target_name":"doThing"}
+  ],
+  "negative_facts": [
+    {"kind":"direct_call","source_path":"src/consumer.ts","subject":"encode"},
+    {"kind":"member_call","source_path":"src/consumer.ts","subject":"untyped.doThing"},
+    {"kind":"member_call","source_path":"src/consumer.ts","subject":"values[0].doThing"}
+  ],
+  "classified_differences": [
+    {"kind":"long_barrel_origin","graphify_behavior":"DeepService remains attached to a chain-17 phantom export identity","zgraphy_improvement":"follow the bounded 18-hop export closure to src/origin.ts#Service"},
+    {"kind":"cycle_side_branch","graphify_behavior":"cycle-a public validate does not preserve an exact origin declaration","zgraphy_improvement":"stop only the cycle branch and retain the independent origin branch with an export_cycle diagnostic"},
+    {"kind":"receiver_evidence","graphify_behavior":"only other.doThing resolves in the controlled call set","zgraphy_improvement":"also resolve namespace, static class, local-new, constructor-property and closure-typed receivers without global fallback"},
+    {"kind":"alias_identity","graphify_behavior":"imports and re-exports are predominantly file-to-origin binary edges","zgraphy_improvement":"retain occurrence-stable import and public alias nodes with imports_from, aliases and re_exports provenance"}
+  ]
+}

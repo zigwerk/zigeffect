@@ -1,0 +1,20 @@
+{
+  "nodes": [
+    {"id":"ext_alpha_zig","label":"alpha.zig","file_type":"code","source_file":"alpha.zig","source_location":"L1"},
+    {"id":"zig_alpha_load","label":"load()","file_type":"code","source_file":"alpha.zig","source_location":"L1"},
+    {"id":"ext_beta_zig","label":"beta.zig","file_type":"code","source_file":"beta.zig","source_location":"L1"},
+    {"id":"zig_beta_load","label":"load()","file_type":"code","source_file":"beta.zig","source_location":"L1"},
+    {"id":"ext_main_zig","label":"main.zig","file_type":"code","source_file":"main.zig","source_location":"L1"},
+    {"id":"zig_main_choose","label":"choose()","file_type":"code","source_file":"main.zig","source_location":"L4"}
+  ],
+  "edges": [
+    {"source":"ext_alpha_zig","target":"zig_alpha_load","relation":"contains","confidence":"EXTRACTED","source_file":"alpha.zig","source_location":"L1","weight":1.0},
+    {"source":"ext_beta_zig","target":"zig_beta_load","relation":"contains","confidence":"EXTRACTED","source_file":"beta.zig","source_location":"L1","weight":1.0},
+    {"source":"ext_main_zig","target":"alpha","relation":"imports_from","confidence":"EXTRACTED","source_file":"main.zig","source_location":"L1","weight":1.0},
+    {"source":"ext_main_zig","target":"beta","relation":"imports_from","confidence":"EXTRACTED","source_file":"main.zig","source_location":"L2","weight":1.0},
+    {"source":"ext_main_zig","target":"zig_main_choose","relation":"contains","confidence":"EXTRACTED","source_file":"main.zig","source_location":"L4","weight":1.0}
+  ],
+  "hyperedges": [],
+  "input_tokens": 0,
+  "output_tokens": 0
+}

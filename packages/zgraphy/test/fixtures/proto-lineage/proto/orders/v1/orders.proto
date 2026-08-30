@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package orders.v1;
+
+import "common/v1/money.proto";
+import "google/protobuf/timestamp.proto";
+
+message GetOrderRequest {
+  string id = 1;
+}
+
+message Order {
+  string id = 1;
+  common.v1.Money total = 2;
+  google.protobuf.Timestamp observed_at = 3;
+  map<string, int64> counters = 4;
+  oneof selector {
+    string name = 5;
+    uint64 number = 6;
+  }
+
+  message Item {
+    string sku = 1;
+  }
+
+  enum State {
+    STATE_UNSPECIFIED = 0;
+    STATE_READY = 1;
+  }
+}
+
+service OrdersService {
+  rpc GetOrder(GetOrderRequest) returns (Order);
+  rpc WatchOrders(GetOrderRequest) returns (stream Order) {}
+}

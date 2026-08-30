@@ -1,0 +1,22 @@
+const native = @import("zigeffect_parser").Zig;
+
+pub const schema = native.schema;
+pub const schema_version = native.schema_version;
+pub const parser_id = native.parser_id;
+pub const parser_version = native.parser_version;
+pub const provider_source_sha256 = "d24d4f9292beda8e64726fe67c6f05e2c32287fc01f3cc61a66bd8debc2fb640";
+pub const DeclarationKind = native.DeclarationKind;
+pub const Span = native.Span;
+pub const Declaration = native.Declaration;
+pub const Import = native.Import;
+pub const BindingScope = native.BindingScope;
+pub const Binding = native.Binding;
+pub const BindingReference = native.BindingReference;
+pub const Call = native.Call;
+pub const ExpressionKind = native.ExpressionKind;
+pub const CallArgument = native.CallArgument;
+pub const Summary = native.Summary;
+pub const Options = native.Options;
+pub const Result = native.Result;
+pub const parse = native.parse;
+pub const validate = native.validate;
