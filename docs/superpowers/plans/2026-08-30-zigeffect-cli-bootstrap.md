@@ -2,14 +2,19 @@
 
 **Design:** `docs/superpowers/specs/2026-08-30-zigeffect-cli-bootstrap-design.md`
 
-**Status:** Shipped in `v0.1.5` on 2026-08-30. The release workflow proved the
-public installer, standalone scaffold, hosted dependency fetch, and generated
+**Status:** The CLI bootstrap shipped in `v0.1.5` on 2026-08-30. Extraction
+completeness, including the Zig-native TLS adapter, is complete on `main` and
+will enter the next immutable release. The release workflow proved the public
+installer, standalone scaffold, hosted dependency fetch, and generated
 application test build on cold Linux.
 
 ## 1. Complete The Source Monorepo
 
 - [x] Import the history and current source for `zgdb`, `zgroach`, and
   `zgraphy` from Yachdee.
+- [x] Complete the HTTP adapter family with a tracked
+  `zigeffect-http-tls-zigtls` package; never treat Yachdee's ignored package
+  cache as source.
 - [x] Add the packages to release ordering after their dependencies.
 - [x] Update repository documentation and package-boundary tests.
 

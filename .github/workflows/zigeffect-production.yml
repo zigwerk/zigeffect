@@ -51,7 +51,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for package in zigeffect-http zigeffect-http-tls-openssl zigeffect-postgres-libpq zigeffect-storage-postgres zigeffect-transport zigeffect-otel zigeffect-redis zigeffect-s3; do
+          for package in zigeffect-http zigeffect-http-tls-openssl zigeffect-http-tls-zigtls zigeffect-postgres-libpq zigeffect-storage-postgres zigeffect-transport zigeffect-otel zigeffect-redis zigeffect-s3; do
             (cd "packages/$package" && zig build test -Doptimize=${{ matrix.optimize }} --summary all)
           done
       - name: Reference and Workbench shard

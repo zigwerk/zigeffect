@@ -14,6 +14,13 @@ The extraction additionally omitted `zgraphy`, `zgdb`, and `zgroach` even
 though generated acceptance tests import `zgraphy`. A clean public release must
 own every first-party package required by its generated output.
 
+The same rule applies to adapter families. The ignored Yachdee
+`packages/zigeffect-http-tls-zigtls` directory contained only an upstream Zig
+package cache, not adapter source. The standalone monorepo therefore owns a
+real `zigeffect-http-tls-zigtls` package that implements the public HTTP TLS
+provider contract against an immutable upstream ZigTLS release. See
+`2026-08-30-zigeffect-extraction-completeness-design.md`.
+
 ## Product Contract
 
 ### Installation
@@ -126,4 +133,3 @@ release references.
    selection, prefix selection, and a fake source build.
 5. A clean-clone E2E installs the CLI, runs `init`, runs `create`, and builds the
    generated application.
-

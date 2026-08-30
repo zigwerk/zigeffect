@@ -41,6 +41,7 @@ packages=(
   zigeffect-transport
   zigeffect-grpc
   zigeffect-http-tls-openssl
+  zigeffect-http-tls-zigtls
   zigeffect-storage-postgres
   zigeffect-reference-system
   zigeffect-cli

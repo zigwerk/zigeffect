@@ -1,0 +1,11 @@
+.{
+    .name = .zigeffect_http_tls_zigtls,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.16.0",
+    .fingerprint = 0x7079f80a74cda940,
+    .dependencies = .{
+        .zigeffect_http = .{ .path = "../zigeffect-http" },
+        .zigeffect_std = .{ .path = "../zigeffect-std" },
+    },
+    .paths = .{ "build.zig", "build.zig.zon", "README.md", "THIRD_PARTY_NOTICES.md", "src", "test", "tests", "vendor" },
+}

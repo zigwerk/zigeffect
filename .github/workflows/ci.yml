@@ -27,6 +27,9 @@ jobs:
         run: scripts/test_package_release.sh
       - name: Verify source installer
         run: scripts/test_install.sh
+      - name: Verify Zig-native TLS adapter
+        working-directory: packages/zigeffect-http-tls-zigtls
+        run: zig build test
       - name: Verify tool and Testing v2 hygiene
         run: |
           packages/zigeffect/tools/check_tool_hygiene.sh

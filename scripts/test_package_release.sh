@@ -15,7 +15,7 @@ trap 'rm -rf "$output"' EXIT
 
 "$packager" 0.1.0 "$output"
 
-for package in zigeffect zigeffect-std zigeffect-postgres zgdb zgroach zgraphy zigeffect-cli; do
+for package in zigeffect zigeffect-std zigeffect-postgres zgdb zgroach zgraphy zigeffect-http-tls-zigtls zigeffect-cli; do
   asset="$output/${package}-0.1.0.tar.gz"
   test -f "$asset"
   grep -q "^${package}-0.1.0.tar.gz"$'\t' "$output/manifest.tsv"
@@ -41,6 +41,7 @@ test -n "$catalog"
 grep -q 'pub const cli_version = "0.1.0";' "$cli_expanded/zigeffect-cli-0.1.0/src/distribution.zig"
 grep -q 'pub const embedded = zstd.Project.DependencyRelease' "$catalog"
 grep -q 'zgraphy-0.1.0.tar.gz' "$catalog"
+grep -q 'zigeffect-http-tls-zigtls-0.1.0.tar.gz' "$catalog"
 grep -q 'zigeffect-std-0.1.0.tar.gz' "$catalog"
 if grep -q '0.0.0-development' "$catalog"; then
   echo "published CLI retained the development release catalog" >&2
@@ -66,6 +67,20 @@ zgraphy_hash="$(cd "$root/packages/zigeffect" && zig fetch --global-cache-dir "$
 zgraphy_cached_archive="$zgraphy_cache/p/${zgraphy_hash}.tar.gz"
 test -f "$zgraphy_cached_archive"
 tar -tzf "$zgraphy_cached_archive" | grep '/benchmarks/embedded\.zig$' >/dev/null
+
+zigtls_expanded="$output/zigtls-expanded"
+mkdir -p "$zigtls_expanded"
+tar -xzf "$output/zigeffect-http-tls-zigtls-0.1.0.tar.gz" -C "$zigtls_expanded"
+zigtls_zon="$(find "$zigtls_expanded" -name build.zig.zon -type f -maxdepth 2 -print -quit)"
+test -n "$zigtls_zon"
+if grep -q '\.path = "\.\./' "$zigtls_zon"; then
+  echo "published ZigTLS adapter retained a monorepo path dependency" >&2
+  exit 1
+fi
+grep -q '46b53db9a931d093e964289bff31401058d0c65448b5839110bfa8104c4c0300' "$zigtls_expanded/zigeffect-http-tls-zigtls-0.1.0/THIRD_PARTY_NOTICES.md"
+test -f "$zigtls_expanded/zigeffect-http-tls-zigtls-0.1.0/vendor/zigtls/src/root.zig"
+zigtls_hash="$(cd "$root/packages/zigeffect" && zig fetch "$output/zigeffect-http-tls-zigtls-0.1.0.tar.gz")"
+test -n "$zigtls_hash"
 
 expected="$(awk -F '\t' '$1 == "zigeffect-std-0.1.0.tar.gz" { print $2 }' "$output/manifest.tsv")"
 actual="$(cd "$root/packages/zigeffect" && zig fetch "$output/zigeffect-std-0.1.0.tar.gz")"
