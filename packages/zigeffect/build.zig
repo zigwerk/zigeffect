@@ -31,6 +31,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/zigeffect.zig"),
         .target = target,
         .optimize = optimize,
+        .link_libc = true,
     });
     const testing_runner = b.path("src/testing/runner.zig");
     _ = b.addModule("zigeffect_test_runner", .{
@@ -44,6 +45,9 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = test_optimize,
     });
+    const test_build_options = b.addOptions();
+    test_build_options.addOption([]const u8, "zig_exe", b.graph.zig_exe);
+    tests.addOptions("test_build_options", test_build_options);
     tests.addImport("zigeffect", zigeffect);
 
     const unit_tests = addV2Test(b, testing_runner, .{

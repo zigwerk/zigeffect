@@ -1,5 +1,6 @@
 const std = @import("std");
 const fx = @import("zigeffect");
+const test_build_options = @import("test_build_options");
 const causal = @import("support/causal_assertions.zig");
 const fixtures = @import("support/fixtures.zig");
 
@@ -18,7 +19,7 @@ fn expectCompileFailDiagnostic(fixture: []const u8, output_path: []const u8, exp
 
     const result = try std.process.run(std.testing.allocator, io, .{
         .argv = &.{
-            "/opt/homebrew/bin/zig",
+            test_build_options.zig_exe,
             "build-exe",
             "--dep",
             "zigeffect",
