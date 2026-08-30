@@ -156,14 +156,14 @@ jobs:
               json.dump(receipt, output, sort_keys=True)
               output.write("\n")
           PY
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: zigeffect-grpc-linux-${{ matrix.arch }}-${{ github.run_id }}
           retention-days: 30
           path: |
             /tmp/zigeffect-grpc-linux-${{ matrix.arch }}.json
             packages/zigeffect-grpc/.zigeffect/tests/suites/zigeffect-grpc-tests.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: zigeffect-grpc-${{ matrix.arch }}-${{ github.run_id }}
@@ -198,7 +198,7 @@ jobs:
           GRPC_SOAK_SECONDS: 900
           GRPC_LOAD_RECEIPT: /tmp/zigeffect-grpc-cloud-run-soak.json
         run: packages/zigeffect-grpc/tests/run_cloud_run_container.sh /tmp/zigeffect-grpc-venv/bin/python
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: zigeffect-grpc-soak-${{ github.run_id }}
           retention-days: 30
@@ -221,7 +221,7 @@ jobs:
         env:
           GRPC_BENCH_RECEIPT: /tmp/zigeffect-grpc-differential-benchmark.json
         run: packages/zigeffect-grpc/benchmarks/run_benchmarks.sh /tmp/zigeffect-grpc-venv/bin/python
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: zigeffect-grpc-benchmark-${{ github.run_id }}
           retention-days: 90
@@ -315,7 +315,7 @@ jobs:
               json.dump(candidate, output, sort_keys=True)
               output.write("\n")
           PY
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: zigeffect-grpc-live-candidate-${{ github.run_id }}
           retention-days: 90

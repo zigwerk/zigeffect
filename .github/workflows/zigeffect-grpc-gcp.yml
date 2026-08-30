@@ -158,7 +158,7 @@ jobs:
               json.dump(receipt, output, sort_keys=True)
               output.write("\n")
           PY
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: zigeffect-grpc-gcp-${{ github.run_id }}
           retention-days: 365

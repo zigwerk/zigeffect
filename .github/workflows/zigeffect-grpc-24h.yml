@@ -130,7 +130,7 @@ jobs:
               json.dump(receipt, output, sort_keys=True)
               output.write("\n")
           PY
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: zigeffect-grpc-native-${{ github.run_id }}-${{ matrix.arch }}
           retention-days: 365
@@ -181,7 +181,7 @@ jobs:
               json.dump(receipt, output, sort_keys=True)
               output.write("\n")
           PY
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: zigeffect-grpc-24h-${{ github.run_id }}-${{ matrix.shard }}
           retention-days: 180
@@ -266,7 +266,7 @@ jobs:
               json.dump(receipt, output, sort_keys=True)
               output.write("\n")
           PY
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: zigeffect-grpc-24h-qualified-${{ github.run_id }}
           retention-days: 365
