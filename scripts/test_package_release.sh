@@ -46,6 +46,10 @@ if grep -q '0.0.0-development' "$catalog"; then
   echo "published CLI retained the development release catalog" >&2
   exit 1
 fi
+cli_root="$cli_expanded/zigeffect-cli-0.1.0"
+cli_install="$output/cli-install"
+(cd "$cli_root" && zig build -Doptimize=ReleaseSafe --prefix "$cli_install")
+"$cli_install/bin/zigeffect" create release-smoke --target "$output/release-smoke" --dry-run >/dev/null
 
 zgraphy_expanded="$output/zgraphy-expanded"
 mkdir -p "$zgraphy_expanded"

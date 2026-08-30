@@ -44,7 +44,7 @@ without `sudo`:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/zigwerk/zigeffect/main/install.sh | \
-  ZIGEFFECT_VERSION=0.1.4 ZIGEFFECT_INSTALL_DIR="$HOME/bin" sh
+  ZIGEFFECT_VERSION=0.1.5 ZIGEFFECT_INSTALL_DIR="$HOME/bin" sh
 ```
 
 Create a standalone application pinned to immutable ZigEffect release

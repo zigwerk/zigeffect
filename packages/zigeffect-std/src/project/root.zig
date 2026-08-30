@@ -1043,7 +1043,9 @@ fn validZigPackageHash(value: []const u8) bool {
         if (std.ascii.isAlphanumeric(byte) or byte == '_' or byte == '-' or byte == '.' or byte == '+') continue;
         return false;
     }
-    return separators >= 2 and std.ascii.isAlphanumeric(value[0]) and std.ascii.isAlphanumeric(value[value.len - 1]);
+    const last = value[value.len - 1];
+    return separators >= 2 and std.ascii.isAlphanumeric(value[0]) and
+        (std.ascii.isAlphanumeric(last) or last == '_' or last == '-');
 }
 
 fn componentKindToProject(kind: ComponentKind) ProjectKind {
@@ -1332,7 +1334,7 @@ test "Project dependency releases round trip immutable Zigwerk package pins" {
                 .{
                     .name = "zigeffect-std",
                     .url = "https://github.com/zigwerk/zigeffect/releases/download/v0.2.0/zigeffect-std-0.2.0.tar.gz",
-                    .hash = "zigeffect_std-0.1.0-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+                    .hash = "zigeffect_std-0.1.0-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB_",
                     .sha256 = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
                 },
             },
