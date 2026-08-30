@@ -1,0 +1,54 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  ZIG_VERSION: 0.16.0
+
+jobs:
+  packages:
+    name: package boundary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: mlugg/setup-zig@v2.2.1
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - name: Verify deterministic consumer archives
+        run: scripts/test_package_release.sh
+      - name: Verify tool and Testing v2 hygiene
+        run: |
+          packages/zigeffect/tools/check_tool_hygiene.sh
+          packages/zigeffect/scripts/check_testing_v2_migration.sh
+
+  core:
+    name: native core
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2.2.1
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - name: Run Testing v2 core suite
+        working-directory: packages/zigeffect
+        run: zig build test-raw --summary all
+
+  frontend:
+    name: frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun run check:frontend

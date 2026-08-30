@@ -13,6 +13,22 @@ ZigEffect is developed as a monorepo so its core, standard library, adapters,
 CLI, reference system and documentation can evolve against one compatibility
 matrix.
 
+## Monorepo Contract
+
+All first-party ZigEffect packages remain in this repository. That includes the
+runtime, standard library, CLI, testing infrastructure, native and browser
+transports, persistence adapters, observability integrations, reference system,
+Workbench and project website. New first-party sister packages join this
+monorepo rather than creating separate source repositories.
+
+Source packages use local workspace dependencies and are tested together. A
+release tag produces package-scoped, immutable archives with public dependency
+URLs so downstream projects can install only what they need. Those archives are
+distribution boundaries, not separately maintained source trees.
+
+Consumers such as Ziac pin released ZigEffect packages and the released CLI.
+They must not copy ZigEffect source or depend on a sibling checkout.
+
 ## Repository
 
 - [`packages/zigeffect`](packages/zigeffect): runtime kernel, workflows,

@@ -1,20 +1,8 @@
 name: zigeffect causal
 
 on:
-  pull_request:
-    paths:
-      - ".github/workflows/zigeffect-causal.yml"
-      - "packages/zigeffect/**"
-      - "package.json"
-      - "bun.lock"
-  push:
-    branches:
-      - main
-    paths:
-      - ".github/workflows/zigeffect-causal.yml"
-      - "packages/zigeffect/**"
-      - "package.json"
-      - "bun.lock"
+  schedule:
+    - cron: "17 2 * * 1"
   workflow_dispatch:
 
 permissions:
