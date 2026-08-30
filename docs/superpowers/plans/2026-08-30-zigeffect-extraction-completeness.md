@@ -35,5 +35,5 @@ next immutable ZigEffect release.
   dependency and both `zgraphy` and ZigTLS in the staged CLI catalog.
 - [x] Pass the full CLI generated-project integration matrix.
 - [x] Pass Testing v2 migration and tool-hygiene guards.
-- [ ] Commit and push only the extraction-completeness changes, preserving
+- [x] Commit and push only the extraction-completeness changes, preserving
   concurrent existing-project adoption work.
